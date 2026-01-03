@@ -150,6 +150,7 @@ public interface IImageConverter
     /// </summary>
     /// <param name="bucketName">S3 bucket name</param>
     /// <param name="s3Key">S3 key for the file (e.g., 'uploads/document.tiff')</param>
+    /// <param name="contentType">File content type (e.g., 'image/tiff')</param>
     /// <param name="awsAccessKey">AWS Access Key ID</param>
     /// <param name="awsSecretKey">AWS Secret Access Key</param>
     /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
@@ -170,6 +171,11 @@ public interface IImageConverter
             Description = "S3 key for upload (e.g., 'uploads/document.tiff')",
             DataType = OSDataType.Text)]
         string s3Key,
+
+        [OSParameter(
+            Description = "File content type (e.g., 'image/tiff', 'application/octet-stream')",
+            DataType = OSDataType.Text)]
+        string contentType,
 
         [OSParameter(
             Description = "AWS Access Key ID",

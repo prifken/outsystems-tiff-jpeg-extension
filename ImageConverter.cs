@@ -693,6 +693,7 @@ public class ImageConverter : IImageConverter
     public S3UploadUrlResult GenerateS3UploadUrl(
         string bucketName,
         string s3Key,
+        string contentType,
         string awsAccessKey,
         string awsSecretKey,
         string awsRegion = "us-east-1",
@@ -721,6 +722,16 @@ public class ImageConverter : IImageConverter
                     ExpiresAt = string.Empty
                 };
 
+            if (string.IsNullOrWhiteSpace(contentType))
+                return new S3UploadUrlResult
+                {
+                    Success = false,
+                    Message = "Content type cannot be empty",
+                    UploadUrl = string.Empty,
+                    S3Key = string.Empty,
+                    ExpiresAt = string.Empty
+                };
+
             if (expirationMinutes < 1 || expirationMinutes > 1440)
                 return new S3UploadUrlResult
                 {
@@ -736,14 +747,15 @@ public class ImageConverter : IImageConverter
             var regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
             using var s3Client = new AmazonS3Client(credentials, regionEndpoint);
 
-            // Generate pre-signed URL for PUT operation
+            // Generate pre-signed URL for PUT operation with Content-Type
             var expiresAt = DateTime.UtcNow.AddMinutes(expirationMinutes);
             var request = new GetPreSignedUrlRequest
             {
                 BucketName = bucketName,
                 Key = s3Key,
                 Verb = HttpVerb.PUT,
-                Expires = expiresAt
+                Expires = expiresAt,
+                ContentType = contentType  // CRITICAL: Must match browser request
             };
 
             string uploadUrl = s3Client.GetPreSignedURL(request);
@@ -751,7 +763,7 @@ public class ImageConverter : IImageConverter
             return new S3UploadUrlResult
             {
                 Success = true,
-                Message = $"Pre-signed upload URL generated successfully. Expires in {expirationMinutes} minutes.",
+                Message = $"Pre-signed upload URL generated successfully. Expires in {expirationMinutes} minutes. Content-Type: {contentType}",
                 UploadUrl = uploadUrl,
                 S3Key = s3Key,
                 ExpiresAt = expiresAt.ToString("yyyy-MM-dd HH:mm:ss UTC")
