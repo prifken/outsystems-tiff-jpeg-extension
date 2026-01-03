@@ -154,7 +154,7 @@ jobs:
 
           try {
             # Get OIDC Discovery document
-            $discoveryUrl = "${{ secrets.ODC_PORTAL_URL }}/.well-known/openid-configuration"
+            $discoveryUrl = "${{ secrets.ODC_PORTAL_URL }}/identity/.well-known/openid-configuration"
             Write-Host "🔍 Fetching OIDC Discovery: $discoveryUrl"
 
             $discovery = Invoke-RestMethod -Uri $discoveryUrl -Method Get
