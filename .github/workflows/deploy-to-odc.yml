@@ -688,9 +688,9 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 6: Tag Library Revision
+      # STEP 6: Create New Release Version
       # ========================================================================
-      - name: "Step 6: Tag Library Revision"
+      - name: "Step 6: Create New Release Version"
         id: release
         shell: pwsh
         env:
@@ -699,7 +699,7 @@ jobs:
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 6: TAG LIBRARY REVISION"
+          Write-Host "STEP 6: CREATE NEW RELEASE VERSION"
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
@@ -715,78 +715,75 @@ jobs:
 
               Write-Host "`n📋 Found $($revisions.Count) revision(s)"
 
-              # Get latest revision
+              # Get latest revision (we'll create a new version tag for it)
               $latestRevision = $revisions | Sort-Object -Property revision -Descending | Select-Object -First 1
               $revisionNumber = $latestRevision.revision
 
               Write-Host "Latest revision: $revisionNumber"
               Write-Host "Current tag: $($latestRevision.tag)"
-              Write-Host "Tagged at: $($latestRevision.taggedAt)"
 
-              # Check if already tagged
-              if ($latestRevision.tag -and $latestRevision.taggedAt) {
-                  Write-Host "`n✅ Revision $revisionNumber is already tagged as '$($latestRevision.tag)'"
-                  Write-Host "This revision was deployed in a previous run."
+              # Calculate next version number based on ALL existing tags
+              $allTags = $revisions | Where-Object { $_.tag } | Select-Object -ExpandProperty tag | Sort-Object -Descending
 
-                  $stepDuration = (Get-Date) - $stepStart
-                  Write-Host "`n⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+              if ($allTags.Count -gt 0) {
+                  $latestTag = $allTags[0]
+                  Write-Host "Previous latest version: $latestTag"
 
-              } else {
-                  Write-Host "`n📝 Revision $revisionNumber is not tagged yet - tagging now..."
-
-                  # Calculate next version number
-                  $allTags = $revisions | Where-Object { $_.tag } | Select-Object -ExpandProperty tag | Sort-Object -Descending
-
-                  if ($allTags.Count -gt 0) {
-                      $latestTag = $allTags[0]
-                      Write-Host "Previous latest tag: $latestTag"
-
-                      # Parse version (assumes format like "0.1.1")
-                      if ($latestTag -match '^(\d+)\.(\d+)\.(\d+)') {
-                          $major = [int]$matches[1]
-                          $minor = [int]$matches[2]
-                          $patch = [int]$matches[3] + 1
-                          $newTag = "$major.$minor.$patch"
-                      } else {
-                          # Fallback to run number
-                          $newTag = "0.1.${{ github.run_number }}"
-                      }
+                  # Auto-increment patch version
+                  if ($latestTag -match '^(\d+)\.(\d+)\.(\d+)') {
+                      $major = [int]$matches[1]
+                      $minor = [int]$matches[2]
+                      $patch = [int]$matches[3] + 1
+                      $newTag = "$major.$minor.$patch"
                   } else {
-                      $newTag = "0.1.0"
+                      $newTag = "0.1.${{ github.run_number }}"
                   }
-
-                  Write-Host "New tag: $newTag"
-
-                  # Tag the revision
-                  $tagUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY/revisions/$revisionNumber"
-                  Write-Host "`n📡 PATCH $tagUrl"
-
-                  $headers["Content-Type"] = "application/json"
-
-                  $body = @{
-                      tag = $newTag
-                      releaseNotes = "Automated deployment from GitHub Actions`nRun #${{ github.run_number }}`nCommit: ${{ github.sha }}"
-                      commitMessage = "Automated release $newTag"
-                  } | ConvertTo-Json
-
-                  $tagResponse = Invoke-RestMethod -Uri $tagUrl -Method Patch -Headers $headers -Body $body
-
-                  Write-Host "✅ Successfully tagged revision $revisionNumber as $newTag"
-
-                  $stepDuration = (Get-Date) - $stepStart
-                  Write-Host "`n⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+              } else {
+                  $newTag = "0.1.0"
               }
 
-              # Save revision info for Step 7
+              Write-Host "`n📝 Creating new release version: $newTag"
+              Write-Host "This will create a new version entry for revision $revisionNumber"
+
+              # Create new version by tagging the revision again
+              $tagUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY/revisions/$revisionNumber"
+              Write-Host "`n📡 PATCH $tagUrl"
+
+              $headers["Content-Type"] = "application/json"
+
+              $body = @{
+                  tag = $newTag
+                  releaseNotes = "Automated deployment from GitHub Actions`n`nRun: #${{ github.run_number }}`nCommit: ${{ github.sha }}`nBranch: ${{ github.ref_name }}`n`nTriggered by: ${{ github.event_name }}"
+                  commitMessage = "Release $newTag via GitHub Actions"
+              } | ConvertTo-Json
+
+              Write-Host "Request body:"
+              Write-Host $body
+              Write-Host ""
+
+              $tagResponse = Invoke-RestMethod -Uri $tagUrl -Method Patch -Headers $headers -Body $body
+
+              Write-Host "✅ Successfully created version $newTag!"
+              Write-Host ""
+              Write-Host "Response:"
+              Write-Host ($tagResponse | ConvertTo-Json -Depth 3)
+
+              # Save for summary
               "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
               "VERSION_TAG=$newTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+              $stepDuration = (Get-Date) - $stepStart
+              Write-Host "`n⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+              Write-Host ""
 
           } catch {
               Write-Error "❌ Step 6 failed: $($_.Exception.Message)"
               if ($_.Exception.Response) {
+                  Write-Host "`nHTTP Status: $($_.Exception.Response.StatusCode.value__)"
                   try {
                       $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-                      Write-Host "Error: $($reader.ReadToEnd())"
+                      Write-Host "Error Response:"
+                      Write-Host $($reader.ReadToEnd())
                   } catch {}
               }
               exit 1
