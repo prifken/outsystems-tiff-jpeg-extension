@@ -210,6 +210,58 @@ jobs:
               Write-Host "Client Secret Length: $("${{ secrets.ODC_CLIENT_SECRET }}".Length) characters"
               Write-Host ""
 
+              # === URL CONSTRUCTION DIAGNOSTICS ===
+              Write-Host "════════════════════════════════════════════════════════════════"
+              Write-Host "🔗 URL CONSTRUCTION DIAGNOSTICS:"
+              Write-Host "════════════════════════════════════════════════════════════════"
+
+              $baseUrl = "${{ secrets.ODC_PORTAL_URL }}"
+              Write-Host "`nBase URL Analysis:"
+              Write-Host "Raw value length: $($baseUrl.Length) characters"
+              Write-Host "Starts with 'https://': $($baseUrl.StartsWith('https://'))"
+              Write-Host "Starts with 'http://': $($baseUrl.StartsWith('http://'))"
+              Write-Host "Ends with '/': $($baseUrl.EndsWith('/'))"
+              Write-Host "Contains whitespace: $($baseUrl -match '\s')"
+
+              # Show first and last few characters (safe to expose)
+              if ($baseUrl.Length -gt 10) {
+                  $firstChars = $baseUrl.Substring(0, [Math]::Min(20, $baseUrl.Length))
+                  $lastChars = $baseUrl.Substring([Math]::Max(0, $baseUrl.Length - 15))
+                  Write-Host "First 20 chars: '$firstChars...'"
+                  Write-Host "Last 15 chars: '...$lastChars'"
+              } else {
+                  Write-Host "Value too short - possible issue!"
+              }
+
+              # Test URL construction
+              $discoveryUrl = "$baseUrl/identity/.well-known/openid-configuration"
+              $tokenUrl = "$baseUrl/auth/realms/29ecfa4f-ec23-4ebe-8d8c-6d556d1daba4/protocol/openid-connect/token"
+
+              Write-Host "`nConstructed URLs:"
+              Write-Host "Discovery URL length: $($discoveryUrl.Length)"
+              Write-Host "Token URL length: $($tokenUrl.Length)"
+
+              # Check for double slashes (common error)
+              $hasDoubleSlash = $discoveryUrl -match '//'
+              if ($hasDoubleSlash) {
+                  Write-Host "⚠️  WARNING: Discovery URL contains '//' - check for trailing slash in base URL!" -ForegroundColor Yellow
+              }
+
+              # Validate URL format
+              try {
+                  $uri = [System.Uri]$baseUrl
+                  Write-Host "`nURL Parse Test:"
+                  Write-Host "✅ Base URL is valid URI"
+                  Write-Host "Scheme: $($uri.Scheme)"
+                  Write-Host "Host: $($uri.Host)"
+                  Write-Host "Port: $($uri.Port)"
+                  Write-Host "Path: '$($uri.PathAndQuery)'"
+              } catch {
+                  Write-Host "❌ Base URL is NOT a valid URI: $($_.Exception.Message)" -ForegroundColor Red
+              }
+
+              Write-Host ""
+
               # === OIDC DISCOVERY ATTEMPT ===
               Write-Host "════════════════════════════════════════════════════════════════"
               Write-Host "PHASE 1A: OIDC DISCOVERY"
