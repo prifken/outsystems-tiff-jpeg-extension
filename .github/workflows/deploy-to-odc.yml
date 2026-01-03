@@ -620,26 +620,8 @@ jobs:
               if ($status -eq "ReadyForReview") {
                 Write-Host "✅ Generation completed successfully!"
 
-                # Log the FULL response to see what's available
-                Write-Host "`n📋 FULL Generation Operation Response:"
-                Write-Host ($response | ConvertTo-Json -Depth 5)
-                Write-Host ""
-
-                # Try to extract library information
                 $libraryKey = $response.libraryKey
                 $libraryName = $response.libraryName
-                $revisionNumber = $response.revisionNumber
-
-                # Also check for other possible property names
-                Write-Host "📊 Extracted Values:"
-                Write-Host "libraryKey property: $libraryKey"
-                Write-Host "libraryName property: $libraryName"
-                Write-Host "revisionNumber property: $revisionNumber"
-                Write-Host ""
-
-                Write-Host "🔍 All Available Properties:"
-                Write-Host ($response.PSObject.Properties.Name -join ', ')
-                Write-Host ""
 
                 if ([string]::IsNullOrEmpty($libraryKey)) {
                   throw "Library key not found in generation operation response"
@@ -647,24 +629,41 @@ jobs:
 
                 Write-Host "🔑 Library Key: $libraryKey"
                 Write-Host "📚 Library Name: $libraryName"
-                Write-Host "📝 Revision Number from API: $revisionNumber"
 
-                "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-                "LIBRARY_NAME=$libraryName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                # Generation API doesn't return revision number, so query for it
+                Write-Host "`n📡 Querying for newly created revision..."
+                $revisionsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$libraryKey/revisions"
 
-                # Capture revision number if present (default to "1" if not in response)
-                if (-not [string]::IsNullOrEmpty($revisionNumber)) {
-                  "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-                  Write-Host "✅ Using revision number from generation response: $revisionNumber"
+                $revisionsResponse = Invoke-RestMethod -Uri $revisionsUrl -Method Get -Headers $headers
+                $allRevisions = $revisionsResponse.results
+
+                Write-Host "Found $($allRevisions.Count) total revision(s)"
+
+                # Find the newest UNTAGGED revision (this should be the one we just created)
+                $untaggedRevisions = $allRevisions | Where-Object { -not $_.tag -or -not $_.taggedAt } | Sort-Object -Property revision -Descending
+
+                if ($untaggedRevisions.Count -gt 0) {
+                  $newRevision = $untaggedRevisions[0]
+                  $revisionNumber = $newRevision.revision
+                  Write-Host "✅ Found new untagged revision: $revisionNumber"
+                  Write-Host "   Created at: $($newRevision.createdAt)"
                 } else {
-                  "REVISION_NUMBER=1" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-                  $revisionNumber = "1"
-                  Write-Host "⚠️  WARNING: revisionNumber not in response, defaulting to: $revisionNumber"
-                  Write-Host "⚠️  This may indicate the generation operation doesn't return the new revision number!"
+                  # Fallback: just get the latest revision (might already be tagged from a previous failed run)
+                  $latestRevision = $allRevisions | Sort-Object -Property revision -Descending | Select-Object -First 1
+                  $revisionNumber = $latestRevision.revision
+                  Write-Host "⚠️  No untagged revisions found, using latest: $revisionNumber"
+                  Write-Host "   Tag: $($latestRevision.tag)"
+                  Write-Host "   This may indicate the revision was already tagged in a previous run."
                 }
 
+                # Save to outputs
+                "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                "LIBRARY_NAME=$libraryName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+                Write-Host "`n📝 Revision Number: $revisionNumber"
+
                 $stepDuration = (Get-Date) - $stepStart
-                Write-Host ""
                 Write-Host "⏱️  Step 5 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
                 Write-Host ""
                 exit 0
