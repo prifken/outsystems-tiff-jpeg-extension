@@ -174,6 +174,107 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
+    /// Converts TIFF binary data to JPEG binary data
+    /// Recommended for small files. For large files, use S3-based conversion.
+    /// Multi-page TIFFs: only first page is converted (use S3 method for multi-page support)
+    /// </summary>
+    /// <param name="tiffData">TIFF file as binary data</param>
+    /// <param name="quality">JPEG quality (1-100)</param>
+    /// <returns>Conversion result with JPEG data in OutputData field</returns>
+    public ConversionResult ConvertTiffToJpegBinary(byte[] tiffData, int quality = 85)
+    {
+        try
+        {
+            // Validate inputs
+            if (tiffData == null || tiffData.Length == 0)
+                return new ConversionResult
+                {
+                    Success = false,
+                    Message = "TIFF data cannot be null or empty",
+                    OutputData = Array.Empty<byte>()
+                };
+
+            // Validate quality range
+            if (quality < 1 || quality > 100)
+                return new ConversionResult
+                {
+                    Success = false,
+                    Message = "Quality must be between 1 and 100",
+                    OutputData = Array.Empty<byte>()
+                };
+
+            // Load TIFF from byte array
+            using var inputStream = new MemoryStream(tiffData);
+            using var image = Image.Load(inputStream);
+
+            int frameCount = image.Frames.Count;
+
+            // Configure JPEG encoder with specified quality
+            var jpegEncoder = new JpegEncoder
+            {
+                Quality = quality
+            };
+
+            // For binary operations, we'll only convert the first page
+            // (Multi-page support can be added via S3 method or ZIP output)
+            using var outputStream = new MemoryStream();
+
+            if (frameCount == 1)
+            {
+                // Single-page TIFF
+                image.Save(outputStream, jpegEncoder);
+
+                return new ConversionResult
+                {
+                    Success = true,
+                    Message = $"Successfully converted single-page TIFF to JPEG (quality: {quality}, size: {outputStream.Length} bytes)",
+                    OutputData = outputStream.ToArray(),
+                    OutputPath = string.Empty,
+                    PagesConverted = 1
+                };
+            }
+            else
+            {
+                // Multi-page TIFF: convert only first page
+                using var frameImage = image.Frames.CloneFrame(0);
+                using var singleFrameImage = frameImage.CloneAs<SixLabors.ImageSharp.PixelFormats.Rgba32>();
+                singleFrameImage.Save(outputStream, jpegEncoder);
+
+                return new ConversionResult
+                {
+                    Success = true,
+                    Message = $"Converted first page of {frameCount}-page TIFF to JPEG (quality: {quality}, size: {outputStream.Length} bytes). Note: Only first page converted. Use file-based or S3 method for multi-page support.",
+                    OutputData = outputStream.ToArray(),
+                    OutputPath = string.Empty,
+                    PagesConverted = 1
+                };
+            }
+        }
+        catch (UnknownImageFormatException ex)
+        {
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"Invalid image format: {ex.Message}. Ensure the input data is a valid TIFF.",
+                OutputData = Array.Empty<byte>(),
+                OutputPath = string.Empty,
+                PagesConverted = 0
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"Conversion error: {ex.Message}",
+                OutputData = Array.Empty<byte>(),
+                OutputPath = string.Empty,
+                PagesConverted = 0
+            };
+        }
+    }
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>

@@ -40,14 +40,14 @@ public interface IImageConverter
         string awsRegion = "us-east-1");
 
     /// <summary>
-    /// Converts a TIFF file to JPEG format (future implementation)
+    /// Converts a TIFF file to JPEG format using file paths
     /// </summary>
     /// <param name="inputPath">Path to input TIFF file</param>
     /// <param name="outputPath">Path for output JPEG file</param>
     /// <param name="quality">JPEG quality (1-100)</param>
     /// <returns>Conversion result</returns>
     [OSAction(
-        Description = "Converts a TIFF file to JPEG format",
+        Description = "Converts a TIFF file to JPEG format using file paths",
         ReturnName = "result",
         ReturnDescription = "Conversion operation result",
         ReturnType = OSDataType.InferredFromDotNetType)]
@@ -61,6 +61,29 @@ public interface IImageConverter
             Description = "Path for output JPEG file",
             DataType = OSDataType.Text)]
         string outputPath,
+
+        [OSParameter(
+            Description = "JPEG quality (1-100)",
+            DataType = OSDataType.Integer)]
+        int quality = 85);
+
+    /// <summary>
+    /// Converts TIFF binary data to JPEG binary data
+    /// Recommended for small files. For large files, use S3-based conversion.
+    /// </summary>
+    /// <param name="tiffData">TIFF file as binary data</param>
+    /// <param name="quality">JPEG quality (1-100)</param>
+    /// <returns>Conversion result with JPEG data in OutputData field</returns>
+    [OSAction(
+        Description = "Converts TIFF binary data to JPEG binary data (for small files)",
+        ReturnName = "result",
+        ReturnDescription = "Conversion result with JPEG binary in OutputData field",
+        ReturnType = OSDataType.InferredFromDotNetType)]
+    ConversionResult ConvertTiffToJpegBinary(
+        [OSParameter(
+            Description = "TIFF file as binary data",
+            DataType = OSDataType.BinaryData)]
+        byte[] tiffData,
 
         [OSParameter(
             Description = "JPEG quality (1-100)",

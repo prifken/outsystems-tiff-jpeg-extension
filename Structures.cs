@@ -77,7 +77,7 @@ public struct ConversionResult
     public string Message;
 
     [OSStructureField(
-        Description = "Output file path or S3 key",
+        Description = "Output file path or S3 key (for file-based operations)",
         DataType = OSDataType.Text,
         IsMandatory = false)]
     public string OutputPath;
@@ -87,4 +87,10 @@ public struct ConversionResult
         DataType = OSDataType.Integer,
         IsMandatory = false)]
     public int PagesConverted;
+
+    [OSStructureField(
+        Description = "Output JPEG data as binary (for binary-based operations)",
+        DataType = OSDataType.BinaryData,
+        IsMandatory = false)]
+    public byte[] OutputData;
 }
