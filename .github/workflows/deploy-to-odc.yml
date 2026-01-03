@@ -57,6 +57,7 @@ jobs:
           Write-Host "  Build ID: $buildId"
           Write-Host "  Timestamp: $timestamp"
           Write-Host "  Run Number: $runNumber"
+          Write-Host ""
 
           # Create BuildInfo class with unique content
           $buildInfoPath = "BuildInfo.cs"
@@ -83,7 +84,26 @@ jobs:
           "@ | Out-File -FilePath $buildInfoPath -Encoding UTF8
 
           Write-Host "✅ BuildInfo.cs created with unique content"
-          Write-Host "   This ensures ODC sees each build as different"
+
+          # Add BuildInfo.cs to the .csproj so it gets compiled
+          $csprojPath = "${{ env.PROJECT_FILE }}"
+          Write-Host "Adding BuildInfo.cs to $csprojPath..."
+
+          [xml]$csproj = Get-Content $csprojPath
+
+          # Create new ItemGroup for BuildInfo.cs
+          $itemGroup = $csproj.CreateElement("ItemGroup")
+          $compile = $csproj.CreateElement("Compile")
+          $compile.SetAttribute("Include", "BuildInfo.cs")
+          $itemGroup.AppendChild($compile) | Out-Null
+          $csproj.Project.AppendChild($itemGroup) | Out-Null
+
+          # Save modified .csproj
+          $csproj.Save((Resolve-Path $csprojPath).Path)
+
+          Write-Host "✅ BuildInfo.cs added to project file"
+          Write-Host "   This ensures it will be compiled into the DLL"
+          Write-Host ""
 
       # Step 5: Restore NuGet dependencies
       - name: Restore dependencies
