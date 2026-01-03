@@ -91,6 +91,60 @@ public interface IImageConverter
         int quality = 85);
 
     /// <summary>
+    /// Converts TIFF file from S3 to JPEG and saves back to S3
+    /// Recommended for large files (>5MB). Handles files of any size.
+    /// Currently converts first page only for multi-page TIFFs.
+    /// </summary>
+    /// <param name="bucketName">S3 bucket name</param>
+    /// <param name="inputS3Key">S3 key of input TIFF file</param>
+    /// <param name="outputS3Key">S3 key for output JPEG file</param>
+    /// <param name="awsAccessKey">AWS Access Key ID</param>
+    /// <param name="awsSecretKey">AWS Secret Access Key</param>
+    /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
+    /// <param name="quality">JPEG quality (1-100)</param>
+    /// <returns>Conversion result with output S3 key in OutputPath field</returns>
+    [OSAction(
+        Description = "Converts TIFF from S3 to JPEG and saves back to S3 (for large files)",
+        ReturnName = "result",
+        ReturnDescription = "Conversion result with output S3 key in OutputPath field",
+        ReturnType = OSDataType.InferredFromDotNetType)]
+    ConversionResult ConvertTiffToJpegS3(
+        [OSParameter(
+            Description = "S3 bucket name",
+            DataType = OSDataType.Text)]
+        string bucketName,
+
+        [OSParameter(
+            Description = "S3 key of input TIFF file (e.g., 'uploads/document.tiff')",
+            DataType = OSDataType.Text)]
+        string inputS3Key,
+
+        [OSParameter(
+            Description = "S3 key for output JPEG file (e.g., 'converted/document.jpg')",
+            DataType = OSDataType.Text)]
+        string outputS3Key,
+
+        [OSParameter(
+            Description = "AWS Access Key ID",
+            DataType = OSDataType.Text)]
+        string awsAccessKey,
+
+        [OSParameter(
+            Description = "AWS Secret Access Key",
+            DataType = OSDataType.Text)]
+        string awsSecretKey,
+
+        [OSParameter(
+            Description = "AWS Region (default: us-east-1)",
+            DataType = OSDataType.Text)]
+        string awsRegion = "us-east-1",
+
+        [OSParameter(
+            Description = "JPEG quality (1-100)",
+            DataType = OSDataType.Integer)]
+        int quality = 85);
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>

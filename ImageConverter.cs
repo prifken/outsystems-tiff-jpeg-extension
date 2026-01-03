@@ -467,6 +467,226 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
+    /// Converts TIFF file from S3 to JPEG and saves back to S3
+    /// Recommended for large files (>5MB). Currently converts first page only.
+    /// </summary>
+    public ConversionResult ConvertTiffToJpegS3(
+        string bucketName,
+        string inputS3Key,
+        string outputS3Key,
+        string awsAccessKey,
+        string awsSecretKey,
+        string awsRegion = "us-east-1",
+        int quality = 85)
+    {
+        var log = new StringBuilder();
+        var startTime = DateTime.UtcNow;
+
+        try
+        {
+            log.AppendLine($"=== ConvertTiffToJpegS3 Execution Log ===");
+            log.AppendLine($"Start Time: {startTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Bucket: {bucketName}");
+            log.AppendLine($"Input S3 Key: {inputS3Key}");
+            log.AppendLine($"Output S3 Key: {outputS3Key}");
+            log.AppendLine($"Region: {awsRegion}");
+            log.AppendLine($"Quality: {quality}");
+            log.AppendLine();
+
+            // Validate inputs
+            log.AppendLine("[STEP 1] Validating inputs...");
+            if (string.IsNullOrWhiteSpace(bucketName))
+            {
+                log.AppendLine("ERROR: Bucket name is null or empty");
+                return new ConversionResult { Success = false, Message = "Bucket name cannot be empty", DetailedLog = log.ToString() };
+            }
+
+            if (string.IsNullOrWhiteSpace(inputS3Key))
+            {
+                log.AppendLine("ERROR: Input S3 key is null or empty");
+                return new ConversionResult { Success = false, Message = "Input S3 key cannot be empty", DetailedLog = log.ToString() };
+            }
+
+            if (string.IsNullOrWhiteSpace(outputS3Key))
+            {
+                log.AppendLine("ERROR: Output S3 key is null or empty");
+                return new ConversionResult { Success = false, Message = "Output S3 key cannot be empty", DetailedLog = log.ToString() };
+            }
+
+            if (quality < 1 || quality > 100)
+            {
+                log.AppendLine($"ERROR: Quality value {quality} is out of range (1-100)");
+                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100", DetailedLog = log.ToString() };
+            }
+
+            log.AppendLine("Validation passed");
+            log.AppendLine();
+
+            // Create S3 client
+            log.AppendLine("[STEP 2] Creating S3 client...");
+            var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
+            var regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
+            using var s3Client = new AmazonS3Client(credentials, regionEndpoint);
+            log.AppendLine($"S3 client created for region: {awsRegion}");
+            log.AppendLine();
+
+            // Download TIFF from S3
+            log.AppendLine("[STEP 3] Downloading TIFF from S3...");
+            using var getRequest = new GetObjectRequest
+            {
+                BucketName = bucketName,
+                Key = inputS3Key
+            };
+
+            using var getResponse = s3Client.GetObjectAsync(getRequest).GetAwaiter().GetResult();
+            log.AppendLine($"Download successful");
+            log.AppendLine($"Content-Type: {getResponse.Headers.ContentType}");
+            log.AppendLine($"Content-Length: {getResponse.ContentLength:N0} bytes ({getResponse.ContentLength / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"Last-Modified: {getResponse.LastModified:yyyy-MM-dd HH:mm:ss UTC}");
+            log.AppendLine();
+
+            // Load TIFF from S3 stream
+            log.AppendLine("[STEP 4] Loading TIFF image from S3 stream...");
+            using var tiffStream = getResponse.ResponseStream;
+            using var image = Image.Load(tiffStream);
+
+            log.AppendLine($"Image loaded successfully");
+            log.AppendLine($"Image format: {image.Metadata.DecodedImageFormat?.Name ?? "Unknown"}");
+            log.AppendLine($"Dimensions: {image.Width} x {image.Height} pixels");
+            log.AppendLine($"Frame count: {image.Frames.Count}");
+
+            int frameCount = image.Frames.Count;
+            if (frameCount > 1)
+            {
+                log.AppendLine($"NOTE: Multi-page TIFF detected. Only converting first page.");
+            }
+            log.AppendLine();
+
+            // Convert to JPEG
+            log.AppendLine("[STEP 5] Converting to JPEG...");
+            var jpegEncoder = new JpegEncoder { Quality = quality };
+
+            using var jpegStream = new MemoryStream();
+
+            if (frameCount == 1)
+            {
+                image.Save(jpegStream, jpegEncoder);
+            }
+            else
+            {
+                // Multi-page: convert only first page
+                using var frameImage = image.Frames.CloneFrame(0);
+                using var singleFrameImage = frameImage.CloneAs<SixLabors.ImageSharp.PixelFormats.Rgba32>();
+                singleFrameImage.Save(jpegStream, jpegEncoder);
+            }
+
+            jpegStream.Position = 0; // Reset for upload
+            log.AppendLine($"Conversion complete");
+            log.AppendLine($"JPEG size: {jpegStream.Length:N0} bytes ({jpegStream.Length / 1024.0:F2} KB)");
+            log.AppendLine($"Compression ratio: {(double)getResponse.ContentLength / jpegStream.Length:F2}x");
+            log.AppendLine();
+
+            // Upload JPEG to S3
+            log.AppendLine("[STEP 6] Uploading JPEG to S3...");
+            using var putRequest = new PutObjectRequest
+            {
+                BucketName = bucketName,
+                Key = outputS3Key,
+                InputStream = jpegStream,
+                ContentType = "image/jpeg"
+            };
+
+            var putResponse = s3Client.PutObjectAsync(putRequest).GetAwaiter().GetResult();
+            log.AppendLine($"Upload successful");
+            log.AppendLine($"Output S3 Key: {outputS3Key}");
+            log.AppendLine($"ETag: {putResponse.ETag}");
+            log.AppendLine();
+
+            var endTime = DateTime.UtcNow;
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: SUCCESS");
+
+            return new ConversionResult
+            {
+                Success = true,
+                Message = $"Successfully converted TIFF to JPEG via S3 (quality: {quality}). Output: s3://{bucketName}/{outputS3Key}",
+                OutputPath = outputS3Key,
+                PagesConverted = 1,
+                DetailedLog = log.ToString()
+            };
+        }
+        catch (AmazonS3Exception s3Ex)
+        {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine("=== EXCEPTION: AmazonS3Exception ===");
+            log.AppendLine($"Message: {s3Ex.Message}");
+            log.AppendLine($"Error Code: {s3Ex.ErrorCode}");
+            log.AppendLine($"Status Code: {s3Ex.StatusCode}");
+            log.AppendLine($"Request ID: {s3Ex.RequestId}");
+            log.AppendLine($"Stack Trace: {s3Ex.StackTrace}");
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: FAILED - S3 Error");
+
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
+                OutputPath = string.Empty,
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
+            };
+        }
+        catch (UnknownImageFormatException ex)
+        {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine("=== EXCEPTION: UnknownImageFormatException ===");
+            log.AppendLine($"Message: {ex.Message}");
+            log.AppendLine($"Stack Trace: {ex.StackTrace}");
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: FAILED - Invalid image format");
+
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"Invalid image format: {ex.Message}. Ensure the S3 file is a valid TIFF.",
+                OutputPath = string.Empty,
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
+            };
+        }
+        catch (Exception ex)
+        {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine($"=== EXCEPTION: {ex.GetType().Name} ===");
+            log.AppendLine($"Message: {ex.Message}");
+            log.AppendLine($"Stack Trace: {ex.StackTrace}");
+            if (ex.InnerException != null)
+            {
+                log.AppendLine($"Inner Exception: {ex.InnerException.GetType().Name}");
+                log.AppendLine($"Inner Message: {ex.InnerException.Message}");
+            }
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: FAILED");
+
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"Conversion error: {ex.Message}",
+                OutputPath = string.Empty,
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
+            };
+        }
+    }
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>
