@@ -73,4 +73,12 @@ public interface IImageConverter
     /// <returns>Current UTC timestamp</returns>
     [OSAction(Description = "Get current timestamp for testing")]
     string GetCurrentTimestamp();
+
+    /// <summary>
+    /// Echoes a test message with timestamp
+    /// </summary>
+    /// <param name="message">Message to echo</param>
+    /// <returns>Echoed message with timestamp</returns>
+    [OSAction(Description = "Echo a test message")]
+    string EchoMessage(string message);
 }

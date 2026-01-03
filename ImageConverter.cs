@@ -92,4 +92,14 @@ public class ImageConverter : IImageConverter
     {
         return $"Server time: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss UTC}";
     }
+
+    /// <summary>
+    /// Echoes a test message with timestamp
+    /// </summary>
+    /// <param name="message">Message to echo</param>
+    /// <returns>Echoed message with timestamp</returns>
+    public string EchoMessage(string message)
+    {
+        return $"Echo: {message} (processed at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss UTC})";
+    }
 }
