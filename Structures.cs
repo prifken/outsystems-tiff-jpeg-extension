@@ -1,0 +1,90 @@
+using OutSystems.ExternalLibraries.SDK;
+
+namespace ImageConverterLibrary;
+
+/// <summary>
+/// AWS credentials structure for S3 operations
+/// </summary>
+[OSStructure(Description = "AWS credentials for S3 access")]
+public struct AWSCredentials
+{
+    [OSStructureField(
+        Description = "AWS Access Key ID",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string AccessKey;
+
+    [OSStructureField(
+        Description = "AWS Secret Access Key",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string SecretKey;
+
+    [OSStructureField(
+        Description = "AWS Region (e.g., us-east-1)",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string Region;
+}
+
+/// <summary>
+/// Result structure for S3 connection test
+/// </summary>
+[OSStructure(Description = "Result from S3 connection test")]
+public struct S3ConnectionResult
+{
+    [OSStructureField(
+        Description = "Indicates if the connection was successful",
+        DataType = OSDataType.Boolean,
+        IsMandatory = true)]
+    public bool Success;
+
+    [OSStructureField(
+        Description = "Connection status message",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string Message;
+
+    [OSStructureField(
+        Description = "AWS Region being used",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string Region;
+
+    [OSStructureField(
+        Description = "Number of accessible buckets",
+        DataType = OSDataType.Integer,
+        IsMandatory = false)]
+    public int BucketCount;
+}
+
+/// <summary>
+/// Result structure for TIFF to JPEG conversion operations
+/// </summary>
+[OSStructure(Description = "Result from image conversion operation")]
+public struct ConversionResult
+{
+    [OSStructureField(
+        Description = "Indicates if the conversion was successful",
+        DataType = OSDataType.Boolean,
+        IsMandatory = true)]
+    public bool Success;
+
+    [OSStructureField(
+        Description = "Status message or error details",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string Message;
+
+    [OSStructureField(
+        Description = "Output file path or S3 key",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string OutputPath;
+
+    [OSStructureField(
+        Description = "Number of pages converted (for multi-page TIFFs)",
+        DataType = OSDataType.Integer,
+        IsMandatory = false)]
+    public int PagesConverted;
+}

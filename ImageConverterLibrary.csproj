@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- ODC Lambda deployment settings - DO NOT change these -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+
+    <!-- Assembly information -->
+    <AssemblyName>ImageConverterLibrary</AssemblyName>
+    <RootNamespace>ImageConverterLibrary</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- OutSystems External Libraries SDK -->
+    <PackageReference Include="OutSystems.ExternalLibraries.SDK" Version="1.5.0" />
+
+    <!-- AWS SDK for S3 operations -->
+    <PackageReference Include="AWSSDK.S3" Version="3.7.400" />
+  </ItemGroup>
+
+</Project>
