@@ -94,12 +94,14 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
-    /// Echoes a test message with timestamp
+    /// Echoes a test message with timestamp and server info
     /// </summary>
     /// <param name="message">Message to echo</param>
-    /// <returns>Echoed message with timestamp</returns>
+    /// <returns>Echoed message with timestamp and environment info</returns>
     public string EchoMessage(string message)
     {
-        return $"Echo: {message} (processed at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss UTC})";
+        var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss UTC");
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        return $"Echo: {message} | Timestamp: {timestamp} | Environment: {environment}";
     }
 }
