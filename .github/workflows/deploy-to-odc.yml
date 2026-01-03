@@ -775,22 +775,51 @@ jobs:
                 Write-Host ($response | ConvertTo-Json -Depth 5)
                 Write-Host ""
                 break
+              } elseif ($status -eq "ReadyForReview") {
+                Write-Host "`n⚠️  Library is ready for review!"
+                Write-Host ""
+                Write-Host "📋 RESPONSE:"
+                Write-Host ($response | ConvertTo-Json -Depth 5)
+                Write-Host ""
+                Write-Host "The library has been generated but is in 'ReadyForReview' status."
+                Write-Host "This may require manual approval in the ODC Portal."
+                Write-Host ""
+
+                if ([string]::IsNullOrEmpty($libraryKey)) {
+                  Write-Host "⚠️  No libraryKey in response - library may need approval first"
+                  Write-Host ""
+                  Write-Host "ACTION REQUIRED:"
+                  Write-Host "1. Go to ODC Portal → Libraries"
+                  Write-Host "2. Find and review the library"
+                  Write-Host "3. Approve it manually"
+                  Write-Host ""
+                  throw "Library is ReadyForReview but has no libraryKey - manual approval may be required"
+                } else {
+                  Write-Host "✅ libraryKey found in ReadyForReview response: $libraryKey"
+                  Write-Host "Proceeding with deployment..."
+                  Write-Host ""
+                  break
+                }
               } elseif ($status -eq "Failed") {
                 Write-Host "`n❌ Generation failed!"
                 Write-Host "Response:"
                 Write-Host ($response | ConvertTo-Json -Depth 5)
                 throw "Library generation failed - check ODC portal for details"
-              } elseif ($status -eq "Processing" -or $status -eq "Pending") {
-                Write-Host "Still processing... waiting 5 seconds"
+              } elseif ($status -eq "Processing" -or $status -eq "Pending" -or $status -eq "Generating") {
+                Write-Host "Still $($status.ToLower())... waiting 5 seconds"
                 Start-Sleep -Seconds 5
               } else {
-                Write-Host "Unknown status: $status"
+                Write-Host "⚠️  Unknown status: $status"
+                Write-Host "Full response:"
+                Write-Host ($response | ConvertTo-Json -Depth 5)
+                Write-Host ""
+                Write-Host "Waiting 5 seconds to see if status changes..."
                 Start-Sleep -Seconds 5
               }
             }
 
-            if ($status -ne "Completed") {
-              throw "Generation did not complete within timeout period (5 minutes)"
+            if ($status -ne "Completed" -and $status -ne "ReadyForReview") {
+              throw "Generation did not complete within timeout period (5 minutes). Final status: $status"
             }
 
             if ([string]::IsNullOrEmpty($libraryKey)) {
