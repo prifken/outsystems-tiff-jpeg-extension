@@ -45,7 +45,7 @@ public class ImageConverter : IImageConverter
             result.AppendLine($"Region: {awsRegion}");
             result.AppendLine($"Buckets found: {bucketCount}");
 
-            if (bucketCount > 0)
+            if (bucketCount > 0 && response.Buckets != null)
             {
                 foreach (var bucket in response.Buckets)
                 {
@@ -532,7 +532,7 @@ public class ImageConverter : IImageConverter
 
             // Download TIFF from S3
             log.AppendLine("[STEP 3] Downloading TIFF from S3...");
-            using var getRequest = new GetObjectRequest
+            var getRequest = new GetObjectRequest
             {
                 BucketName = bucketName,
                 Key = inputS3Key
@@ -588,7 +588,7 @@ public class ImageConverter : IImageConverter
 
             // Upload JPEG to S3
             log.AppendLine("[STEP 6] Uploading JPEG to S3...");
-            using var putRequest = new PutObjectRequest
+            var putRequest = new PutObjectRequest
             {
                 BucketName = bucketName,
                 Key = outputS3Key,
