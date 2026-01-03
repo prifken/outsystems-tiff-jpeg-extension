@@ -93,4 +93,10 @@ public struct ConversionResult
         DataType = OSDataType.BinaryData,
         IsMandatory = false)]
     public byte[] OutputData;
+
+    [OSStructureField(
+        Description = "Detailed execution log for troubleshooting (timestamps, steps, diagnostics)",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string DetailedLog;
 }

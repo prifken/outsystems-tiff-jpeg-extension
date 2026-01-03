@@ -77,98 +77,204 @@ public class ImageConverter : IImageConverter
     /// <returns>Conversion operation result</returns>
     public ConversionResult ConvertTiffToJpeg(string inputPath, string outputPath, int quality = 85)
     {
+        var log = new StringBuilder();
+        var startTime = DateTime.UtcNow;
+
         try
         {
+            log.AppendLine($"=== ConvertTiffToJpeg Execution Log ===");
+            log.AppendLine($"Start Time: {startTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Input Path: {inputPath}");
+            log.AppendLine($"Output Path: {outputPath}");
+            log.AppendLine($"Quality Parameter: {quality}");
+            log.AppendLine();
+
             // Validate inputs
+            log.AppendLine("[STEP 1] Validating inputs...");
             if (string.IsNullOrWhiteSpace(inputPath))
-                return new ConversionResult { Success = false, Message = "Input path cannot be empty" };
+            {
+                log.AppendLine("ERROR: Input path is null or empty");
+                return new ConversionResult { Success = false, Message = "Input path cannot be empty", DetailedLog = log.ToString() };
+            }
 
             if (string.IsNullOrWhiteSpace(outputPath))
-                return new ConversionResult { Success = false, Message = "Output path cannot be empty" };
+            {
+                log.AppendLine("ERROR: Output path is null or empty");
+                return new ConversionResult { Success = false, Message = "Output path cannot be empty", DetailedLog = log.ToString() };
+            }
 
             if (!File.Exists(inputPath))
-                return new ConversionResult { Success = false, Message = $"Input file not found: {inputPath}" };
+            {
+                log.AppendLine($"ERROR: Input file not found at path: {inputPath}");
+                return new ConversionResult { Success = false, Message = $"Input file not found: {inputPath}", DetailedLog = log.ToString() };
+            }
+
+            var inputFileInfo = new FileInfo(inputPath);
+            log.AppendLine($"Input file found");
+            log.AppendLine($"Input file size: {inputFileInfo.Length:N0} bytes ({inputFileInfo.Length / 1024.0:F2} KB)");
 
             // Validate quality range
             if (quality < 1 || quality > 100)
-                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100" };
+            {
+                log.AppendLine($"ERROR: Quality value {quality} is out of range (1-100)");
+                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100", DetailedLog = log.ToString() };
+            }
+
+            log.AppendLine("Validation passed");
+            log.AppendLine();
 
             // Load the TIFF image
+            log.AppendLine("[STEP 2] Loading TIFF image from file...");
             using var image = Image.Load(inputPath);
+
+            log.AppendLine($"Image loaded successfully");
+            log.AppendLine($"Image format: {image.Metadata.DecodedImageFormat?.Name ?? "Unknown"}");
+            log.AppendLine($"Dimensions: {image.Width} x {image.Height} pixels");
+            log.AppendLine($"Frame count: {image.Frames.Count}");
+            log.AppendLine();
 
             int frameCount = image.Frames.Count;
             var outputPaths = new List<string>();
 
             // Configure JPEG encoder with specified quality
+            log.AppendLine("[STEP 3] Configuring JPEG encoder...");
             var jpegEncoder = new JpegEncoder
             {
                 Quality = quality
             };
+            log.AppendLine($"JPEG quality set to: {quality}");
+            log.AppendLine();
 
             if (frameCount == 1)
             {
                 // Single-page TIFF: save directly to outputPath
+                log.AppendLine("[STEP 4] Converting single-page TIFF to JPEG...");
                 image.Save(outputPath, jpegEncoder);
                 outputPaths.Add(outputPath);
+
+                var outputFileInfo = new FileInfo(outputPath);
+                log.AppendLine($"Conversion complete");
+                log.AppendLine($"Output file: {outputPath}");
+                log.AppendLine($"Output size: {outputFileInfo.Length:N0} bytes ({outputFileInfo.Length / 1024.0:F2} KB)");
+                log.AppendLine($"Compression ratio: {(double)inputFileInfo.Length / outputFileInfo.Length:F2}x");
+                log.AppendLine();
+
+                var endTime = DateTime.UtcNow;
+                log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+                log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+                log.AppendLine($"Status: SUCCESS");
 
                 return new ConversionResult
                 {
                     Success = true,
                     Message = $"Successfully converted single-page TIFF to JPEG (quality: {quality})",
                     OutputPath = outputPath,
-                    PagesConverted = 1
+                    PagesConverted = 1,
+                    DetailedLog = log.ToString()
                 };
             }
             else
             {
                 // Multi-page TIFF: save each frame as separate JPEG
-                // Generate output filenames: outputPath_1.jpg, outputPath_2.jpg, etc.
+                log.AppendLine($"[STEP 4] Converting multi-page TIFF ({frameCount} pages)...");
+                log.AppendLine($"Each page will be saved as a separate JPEG file");
+                log.AppendLine();
+
+                // Generate output filenames: outputPath_page1.jpg, outputPath_page2.jpg, etc.
                 var directory = Path.GetDirectoryName(outputPath) ?? string.Empty;
                 var fileNameWithoutExt = Path.GetFileNameWithoutExtension(outputPath);
                 var extension = ".jpg";
 
+                log.AppendLine($"Output directory: {(string.IsNullOrEmpty(directory) ? "<current directory>" : directory)}");
+                log.AppendLine($"Base filename: {fileNameWithoutExt}");
+                log.AppendLine();
+
+                long totalOutputSize = 0;
+
                 for (int i = 0; i < frameCount; i++)
                 {
                     var frameOutputPath = Path.Combine(directory, $"{fileNameWithoutExt}_page{i + 1}{extension}");
+                    log.AppendLine($"Processing page {i + 1}/{frameCount}...");
 
                     // Clone the specific frame and save it
                     using var frameImage = image.Frames.CloneFrame(i);
                     using var singleFrameImage = frameImage.CloneAs<SixLabors.ImageSharp.PixelFormats.Rgba32>();
                     singleFrameImage.Save(frameOutputPath, jpegEncoder);
 
+                    var frameFileInfo = new FileInfo(frameOutputPath);
+                    totalOutputSize += frameFileInfo.Length;
+                    log.AppendLine($"  Saved: {Path.GetFileName(frameOutputPath)} ({frameFileInfo.Length:N0} bytes)");
+
                     outputPaths.Add(frameOutputPath);
                 }
 
                 var firstOutputPath = outputPaths.First();
-                var allPaths = string.Join(", ", outputPaths);
+                var allPaths = string.Join(", ", outputPaths.Select(Path.GetFileName));
+
+                log.AppendLine();
+                log.AppendLine($"All {frameCount} pages converted successfully");
+                log.AppendLine($"Total output size: {totalOutputSize:N0} bytes ({totalOutputSize / 1024.0:F2} KB)");
+                log.AppendLine($"Compression ratio: {(double)inputFileInfo.Length / totalOutputSize:F2}x");
+                log.AppendLine();
+
+                var endTime = DateTime.UtcNow;
+                log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+                log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+                log.AppendLine($"Status: SUCCESS");
 
                 return new ConversionResult
                 {
                     Success = true,
                     Message = $"Successfully converted {frameCount}-page TIFF to {frameCount} JPEG files (quality: {quality}). Files: {allPaths}",
                     OutputPath = firstOutputPath,
-                    PagesConverted = frameCount
+                    PagesConverted = frameCount,
+                    DetailedLog = log.ToString()
                 };
             }
         }
         catch (UnknownImageFormatException ex)
         {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine("=== EXCEPTION: UnknownImageFormatException ===");
+            log.AppendLine($"Message: {ex.Message}");
+            log.AppendLine($"Stack Trace: {ex.StackTrace}");
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: FAILED - Invalid image format");
+
             return new ConversionResult
             {
                 Success = false,
                 Message = $"Invalid image format: {ex.Message}. Ensure the input file is a valid TIFF.",
                 OutputPath = string.Empty,
-                PagesConverted = 0
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
             };
         }
         catch (Exception ex)
         {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine($"=== EXCEPTION: {ex.GetType().Name} ===");
+            log.AppendLine($"Message: {ex.Message}");
+            log.AppendLine($"Stack Trace: {ex.StackTrace}");
+            if (ex.InnerException != null)
+            {
+                log.AppendLine($"Inner Exception: {ex.InnerException.GetType().Name}");
+                log.AppendLine($"Inner Message: {ex.InnerException.Message}");
+            }
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: FAILED");
+
             return new ConversionResult
             {
                 Success = false,
                 Message = $"Conversion error: {ex.Message}",
                 OutputPath = string.Empty,
-                PagesConverted = 0
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
             };
         }
     }
@@ -183,37 +289,69 @@ public class ImageConverter : IImageConverter
     /// <returns>Conversion result with JPEG data in OutputData field</returns>
     public ConversionResult ConvertTiffToJpegBinary(byte[] tiffData, int quality = 85)
     {
+        var log = new StringBuilder();
+        var startTime = DateTime.UtcNow;
+
         try
         {
+            log.AppendLine($"=== ConvertTiffToJpegBinary Execution Log ===");
+            log.AppendLine($"Start Time: {startTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Quality Parameter: {quality}");
+            log.AppendLine();
+
             // Validate inputs
+            log.AppendLine("[STEP 1] Validating inputs...");
             if (tiffData == null || tiffData.Length == 0)
+            {
+                log.AppendLine("ERROR: TIFF data is null or empty");
                 return new ConversionResult
                 {
                     Success = false,
                     Message = "TIFF data cannot be null or empty",
-                    OutputData = Array.Empty<byte>()
+                    OutputData = Array.Empty<byte>(),
+                    DetailedLog = log.ToString()
                 };
+            }
+
+            log.AppendLine($"Input size: {tiffData.Length:N0} bytes ({tiffData.Length / 1024.0:F2} KB)");
 
             // Validate quality range
             if (quality < 1 || quality > 100)
+            {
+                log.AppendLine($"ERROR: Quality value {quality} is out of range (1-100)");
                 return new ConversionResult
                 {
                     Success = false,
                     Message = "Quality must be between 1 and 100",
-                    OutputData = Array.Empty<byte>()
+                    OutputData = Array.Empty<byte>(),
+                    DetailedLog = log.ToString()
                 };
+            }
+
+            log.AppendLine("Validation passed");
+            log.AppendLine();
 
             // Load TIFF from byte array
+            log.AppendLine("[STEP 2] Loading TIFF image from memory stream...");
             using var inputStream = new MemoryStream(tiffData);
             using var image = Image.Load(inputStream);
+
+            log.AppendLine($"Image loaded successfully");
+            log.AppendLine($"Image format: {image.Metadata.DecodedImageFormat?.Name ?? "Unknown"}");
+            log.AppendLine($"Dimensions: {image.Width} x {image.Height} pixels");
+            log.AppendLine($"Frame count: {image.Frames.Count}");
+            log.AppendLine();
 
             int frameCount = image.Frames.Count;
 
             // Configure JPEG encoder with specified quality
+            log.AppendLine("[STEP 3] Configuring JPEG encoder...");
             var jpegEncoder = new JpegEncoder
             {
                 Quality = quality
             };
+            log.AppendLine($"JPEG quality set to: {quality}");
+            log.AppendLine();
 
             // For binary operations, we'll only convert the first page
             // (Multi-page support can be added via S3 method or ZIP output)
@@ -222,7 +360,17 @@ public class ImageConverter : IImageConverter
             if (frameCount == 1)
             {
                 // Single-page TIFF
+                log.AppendLine("[STEP 4] Converting single-page TIFF to JPEG...");
                 image.Save(outputStream, jpegEncoder);
+                log.AppendLine($"Conversion complete");
+                log.AppendLine($"Output size: {outputStream.Length:N0} bytes ({outputStream.Length / 1024.0:F2} KB)");
+                log.AppendLine($"Compression ratio: {(double)tiffData.Length / outputStream.Length:F2}x");
+                log.AppendLine();
+
+                var endTime = DateTime.UtcNow;
+                log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+                log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+                log.AppendLine($"Status: SUCCESS");
 
                 return new ConversionResult
                 {
@@ -230,15 +378,33 @@ public class ImageConverter : IImageConverter
                     Message = $"Successfully converted single-page TIFF to JPEG (quality: {quality}, size: {outputStream.Length} bytes)",
                     OutputData = outputStream.ToArray(),
                     OutputPath = string.Empty,
-                    PagesConverted = 1
+                    PagesConverted = 1,
+                    DetailedLog = log.ToString()
                 };
             }
             else
             {
                 // Multi-page TIFF: convert only first page
+                log.AppendLine($"[STEP 4] Converting multi-page TIFF (page 1 of {frameCount})...");
+                log.AppendLine($"NOTE: Only first page will be converted in binary mode");
+                log.AppendLine($"For full multi-page support, use file-based or S3 method");
+                log.AppendLine();
+
                 using var frameImage = image.Frames.CloneFrame(0);
+                log.AppendLine($"Frame 0 cloned successfully");
+
                 using var singleFrameImage = frameImage.CloneAs<SixLabors.ImageSharp.PixelFormats.Rgba32>();
                 singleFrameImage.Save(outputStream, jpegEncoder);
+
+                log.AppendLine($"Conversion complete");
+                log.AppendLine($"Output size: {outputStream.Length:N0} bytes ({outputStream.Length / 1024.0:F2} KB)");
+                log.AppendLine($"Compression ratio: {(double)tiffData.Length / outputStream.Length:F2}x");
+                log.AppendLine();
+
+                var endTime = DateTime.UtcNow;
+                log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+                log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+                log.AppendLine($"Status: SUCCESS (partial - page 1 only)");
 
                 return new ConversionResult
                 {
@@ -246,30 +412,56 @@ public class ImageConverter : IImageConverter
                     Message = $"Converted first page of {frameCount}-page TIFF to JPEG (quality: {quality}, size: {outputStream.Length} bytes). Note: Only first page converted. Use file-based or S3 method for multi-page support.",
                     OutputData = outputStream.ToArray(),
                     OutputPath = string.Empty,
-                    PagesConverted = 1
+                    PagesConverted = 1,
+                    DetailedLog = log.ToString()
                 };
             }
         }
         catch (UnknownImageFormatException ex)
         {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine("=== EXCEPTION: UnknownImageFormatException ===");
+            log.AppendLine($"Message: {ex.Message}");
+            log.AppendLine($"Stack Trace: {ex.StackTrace}");
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: FAILED - Invalid image format");
+
             return new ConversionResult
             {
                 Success = false,
                 Message = $"Invalid image format: {ex.Message}. Ensure the input data is a valid TIFF.",
                 OutputData = Array.Empty<byte>(),
                 OutputPath = string.Empty,
-                PagesConverted = 0
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
             };
         }
         catch (Exception ex)
         {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine($"=== EXCEPTION: {ex.GetType().Name} ===");
+            log.AppendLine($"Message: {ex.Message}");
+            log.AppendLine($"Stack Trace: {ex.StackTrace}");
+            if (ex.InnerException != null)
+            {
+                log.AppendLine($"Inner Exception: {ex.InnerException.GetType().Name}");
+                log.AppendLine($"Inner Message: {ex.InnerException.Message}");
+            }
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: FAILED");
+
             return new ConversionResult
             {
                 Success = false,
                 Message = $"Conversion error: {ex.Message}",
                 OutputData = Array.Empty<byte>(),
                 OutputPath = string.Empty,
-                PagesConverted = 0
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
             };
         }
     }
