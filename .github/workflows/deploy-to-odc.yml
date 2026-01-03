@@ -620,6 +620,7 @@ jobs:
               if ($status -eq "ReadyForReview") {
                 $libraryKey = $response.libraryKey
                 $libraryName = $response.libraryName
+                $revisionNumber = $response.revisionNumber
 
                 if ([string]::IsNullOrEmpty($libraryKey)) {
                   throw "Missing libraryKey in response"
@@ -628,11 +629,20 @@ jobs:
                 "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
                 "LIBRARY_NAME=$libraryName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
+                # Capture revision number if present (default to "1" if not in response)
+                if (-not [string]::IsNullOrEmpty($revisionNumber)) {
+                  "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                } else {
+                  "REVISION_NUMBER=1" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                  $revisionNumber = "1"
+                }
+
                 $stepDuration = (Get-Date) - $stepStart
                 Write-Host ""
                 Write-Host "✅ Generation completed successfully!"
                 Write-Host "🔑 Library Key: $libraryKey"
                 Write-Host "📚 Library Name: $libraryName"
+                Write-Host "📝 Revision Number: $revisionNumber"
                 Write-Host "⏱️  Step 5 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
                 Write-Host ""
                 exit 0
@@ -657,23 +667,30 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 6: Create Release
+      # STEP 6: Tag Library Revision for Release
       # ========================================================================
-      - name: "Step 6: Create Release"
+      - name: "Step 6: Tag Library Revision"
         id: release
         shell: pwsh
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
           LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
+          REVISION_NUMBER: ${{ steps.poll.outputs.REVISION_NUMBER }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 6: CREATE RELEASE"
+          Write-Host "STEP 6: TAG LIBRARY REVISION FOR RELEASE"
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-management/v1/assets/$env:LIBRARY_KEY/releases"
-            Write-Host "📡 POST $apiUrl"
+            # Use revision number from Step 5 or default to "1"
+            $revisionNumber = $env:REVISION_NUMBER
+            if ([string]::IsNullOrEmpty($revisionNumber)) {
+              $revisionNumber = "1"
+            }
+
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY/revisions/$revisionNumber"
+            Write-Host "📡 PATCH $apiUrl"
 
             $headers = @{
               "Authorization" = "Bearer $env:ACCESS_TOKEN"
@@ -681,24 +698,18 @@ jobs:
             }
 
             $body = @{
-              versionNumber = "0.1.${{ github.run_number }}"
-              releaseNotes = "Automated deployment from GitHub Actions (Run #${{ github.run_number }})"
+              tag = "0.1.0"
+              releaseNotes = "Automated deployment from GitHub Actions - Run #${{ github.run_number }}"
+              commitMessage = "Deploy from commit ${{ github.sha }}"
             } | ConvertTo-Json
 
-            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
-
-            $releaseKey = $response.releaseKey
-
-            if ([string]::IsNullOrEmpty($releaseKey)) {
-              throw "Missing releaseKey in response"
-            }
-
-            "RELEASE_KEY=$releaseKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "Tagging revision $revisionNumber as release 0.1.0..."
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Patch -Headers $headers -Body $body
 
             $stepDuration = (Get-Date) - $stepStart
-            Write-Host "✅ Release created successfully"
-            Write-Host "🔑 Release Key: $releaseKey"
-            Write-Host "📌 Version: 0.1.${{ github.run_number }}"
+            Write-Host "✅ Library revision tagged for release"
+            Write-Host "📌 Tag: 0.1.0"
+            Write-Host "📝 Revision: $revisionNumber"
             Write-Host "⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
             Write-Host ""
 
@@ -712,52 +723,31 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 7: Publish to Development
+      # STEP 7: Complete - Library Tagged and Ready
       # ========================================================================
-      - name: "Step 7: Deploy to Development"
+      - name: "Step 7: Deployment Complete"
         id: deploy
         shell: pwsh
-        env:
-          ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
-          LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
-          RELEASE_KEY: ${{ steps.release.outputs.RELEASE_KEY }}
         run: |
-          $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 7: DEPLOY TO DEVELOPMENT"
+          Write-Host "🎉 DEPLOYMENT COMPLETE!"
           Write-Host "════════════════════════════════════════════════════════════════"
-
-          try {
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-management/v1/assets/$env:LIBRARY_KEY/releases/$env:RELEASE_KEY/deployments"
-            Write-Host "📡 POST $apiUrl"
-
-            $headers = @{
-              "Authorization" = "Bearer $env:ACCESS_TOKEN"
-              "Content-Type" = "application/json"
-            }
-
-            $body = @{
-              targetStage = "Development"
-            } | ConvertTo-Json
-
-            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
-
-            $stepDuration = (Get-Date) - $stepStart
-            Write-Host "✅ Deployed to Development successfully"
-            Write-Host "⏱️  Step 7 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
-            Write-Host ""
-            Write-Host "════════════════════════════════════════════════════════════════"
-            Write-Host "🎉 DEPLOYMENT COMPLETE!"
-            Write-Host "════════════════════════════════════════════════════════════════"
-
-          } catch {
-            Write-Error "❌ Step 7 failed: $($_.Exception.Message)"
-            if ($_.Exception.Response) {
-              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-              Write-Host "Error details: $($reader.ReadToEnd())"
-            }
-            exit 1
-          }
+          Write-Host ""
+          Write-Host "Library has been successfully:"
+          Write-Host "✅ Uploaded to ODC"
+          Write-Host "✅ Generated and processed"
+          Write-Host "✅ Tagged as release version 0.1.0"
+          Write-Host ""
+          Write-Host "The library is now available in ODC Portal for:"
+          Write-Host "- Manual deployment to stages"
+          Write-Host "- Integration into applications"
+          Write-Host "- Further configuration"
+          Write-Host ""
+          Write-Host "Next steps in ODC Portal:"
+          Write-Host "1. Navigate to Libraries section"
+          Write-Host "2. Find your library (check Step 5 output for name)"
+          Write-Host "3. Deploy the tagged revision to desired stage"
+          Write-Host ""
 
       # ========================================================================
       # SUCCESS SUMMARY
