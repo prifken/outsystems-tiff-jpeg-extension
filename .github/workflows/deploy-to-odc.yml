@@ -667,87 +667,81 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 6: Tag Library Revision for Release
+      # STEP 6: Get Revision and Build Key
       # ========================================================================
-      - name: "Step 6: Tag Library Revision"
+      - name: "Step 6: Get Revision and Build Key"
         id: release
         shell: pwsh
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
           LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
-          REVISION_NUMBER: ${{ steps.poll.outputs.REVISION_NUMBER }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 6: TAG LIBRARY REVISION FOR RELEASE"
+          Write-Host "STEP 6: GET REVISION AND BUILD KEY"
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-            # Use revision number from Step 5 or default to "1"
-            $revisionNumber = $env:REVISION_NUMBER
-            if ([string]::IsNullOrEmpty($revisionNumber)) {
-              $revisionNumber = "1"
-            }
+              # Step 6A: Get list of revisions
+              $revisionsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY/revisions"
+              Write-Host "📡 GET $revisionsUrl"
 
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY/revisions/$revisionNumber"
-            Write-Host "📡 PATCH $apiUrl"
+              $headers = @{
+                  "Authorization" = "Bearer $env:ACCESS_TOKEN"
+              }
 
-            $headers = @{
-              "Authorization" = "Bearer $env:ACCESS_TOKEN"
-              "Content-Type" = "application/json"
-            }
+              $revisions = Invoke-RestMethod -Uri $revisionsUrl -Method Get -Headers $headers
 
-            $body = @{
-              tag = "0.1.0"
-              releaseNotes = "Automated deployment from GitHub Actions - Run #${{ github.run_number }}"
-              commitMessage = "Deploy from commit ${{ github.sha }}"
-            } | ConvertTo-Json
+              Write-Host "`n📋 Found $($revisions.Count) revision(s)"
 
-            Write-Host "Tagging revision $revisionNumber as release 0.1.0..."
-            $response = Invoke-RestMethod -Uri $apiUrl -Method Patch -Headers $headers -Body $body
+              # Get the latest revision (highest number)
+              $latestRevision = $revisions | Sort-Object -Property revisionNumber -Descending | Select-Object -First 1
+              $revisionNumber = $latestRevision.revisionNumber
 
-            $stepDuration = (Get-Date) - $stepStart
-            Write-Host "✅ Library revision tagged for release"
-            Write-Host "📌 Tag: 0.1.0"
-            Write-Host "📝 Revision: $revisionNumber"
-            Write-Host "⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
-            Write-Host ""
+              Write-Host "✅ Latest revision: $revisionNumber"
+
+              # Step 6B: Get build key for Release build type
+              $buildsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/builds/v1/build-operations?assetKey=$env:LIBRARY_KEY&assetRevision=$revisionNumber&byBuildType=Release"
+              Write-Host "`n📡 GET $buildsUrl"
+
+              $builds = Invoke-RestMethod -Uri $buildsUrl -Method Get -Headers $headers
+
+              Write-Host "`n📋 Builds response:"
+              Write-Host ($builds | ConvertTo-Json -Depth 3)
+
+              # Extract build key from response
+              $buildKey = $null
+              if ($builds.items -and $builds.items.Count -gt 0) {
+                  $buildKey = $builds.items[0].key
+              } elseif ($builds.key) {
+                  $buildKey = $builds.key
+              } elseif ($builds.buildKey) {
+                  $buildKey = $builds.buildKey
+              }
+
+              if ([string]::IsNullOrEmpty($buildKey)) {
+                  throw "Could not find build key in response"
+              }
+
+              Write-Host "✅ Build key: $buildKey"
+
+              # Save for next step
+              "BUILD_KEY=$buildKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+              $stepDuration = (Get-Date) - $stepStart
+              Write-Host "`n⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+              Write-Host ""
 
           } catch {
-            Write-Error "❌ Step 6 failed: $($_.Exception.Message)"
-
-            if ($_.Exception.Response) {
-                Write-Host "`n📋 HTTP Response Details:"
-                Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
-                Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
-
-                try {
-                    $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-                    $errorBody = $reader.ReadToEnd()
-                    Write-Host "`n📄 Error Response Body:"
-                    Write-Host $errorBody
-
-                    # Try to parse as JSON for better readability
-                    try {
-                        $errorJson = $errorBody | ConvertFrom-Json
-                        Write-Host "`n📝 Parsed Error Details:"
-                        Write-Host ($errorJson | ConvertTo-Json -Depth 5)
-                    } catch {
-                        # Already displayed raw body above
-                    }
-                } catch {
-                    Write-Host "Could not read error response body"
-                }
-            }
-
-            # Also log what we sent
-            Write-Host "`n📤 Request Details:"
-            Write-Host "URL: $apiUrl"
-            Write-Host "Method: PATCH"
-            Write-Host "Body sent:"
-            Write-Host $body
-
-            exit 1
+              Write-Error "❌ Step 6 failed: $($_.Exception.Message)"
+              if ($_.Exception.Response) {
+                  try {
+                      $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                      Write-Host "Error: $($reader.ReadToEnd())"
+                  } catch {}
+              }
+              exit 1
           }
 
       # ========================================================================
