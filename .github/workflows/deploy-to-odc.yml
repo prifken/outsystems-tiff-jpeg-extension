@@ -658,23 +658,66 @@ jobs:
           Write-Host "`n📥 INPUTS:"
           Write-Host "  ACCESS_TOKEN: $(if($env:ACCESS_TOKEN) {'***SET***'} else {'NOT SET'})"
           Write-Host "  LIBRARY_KEY: $env:LIBRARY_KEY"
+          Write-Host "  LIBRARY_KEY Length: $($env:LIBRARY_KEY.Length) chars"
+          Write-Host "  LIBRARY_KEY Format: $(if($env:LIBRARY_KEY -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {'Valid GUID'} else {'Invalid GUID format'})"
           Write-Host "  DOWNLOAD_URL: $(if($env:DOWNLOAD_URL) {'***SET***'} else {'NOT SET'})"
           Write-Host ""
 
           try {
-            # Official API Step 3: POST /api/external-library-generation/v1/libraries/{libraryKey}/uploads
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-library-generation/v1/libraries/$env:LIBRARY_KEY/uploads"
-
             $headers = @{
               "Authorization" = "Bearer $env:ACCESS_TOKEN"
               "Content-Type" = "application/json"
             }
 
+            # ============================================================
+            # PRE-FLIGHT CHECK: Verify library exists
+            # ============================================================
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Host "PRE-FLIGHT: Verify library exists"
+            Write-Host "════════════════════════════════════════════════════════════════"
+
+            $verifyUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY"
+            Write-Host "`n🔍 Checking if library exists..."
+            Write-Host "GET $verifyUrl"
+            Write-Host ""
+
+            try {
+              $verifyResponse = Invoke-RestMethod -Uri $verifyUrl -Method Get -Headers $headers -ErrorAction Stop
+              Write-Host "✅ Library exists!"
+              Write-Host "Library Name: $($verifyResponse.name)"
+              Write-Host "Library Type: $($verifyResponse.type)"
+              Write-Host "Current Revision: $($verifyResponse.currentRevisionNumber)"
+              Write-Host ""
+            } catch {
+              $statusCode = $_.Exception.Response.StatusCode.value__
+              Write-Host "⚠️  Library verification returned: $statusCode"
+
+              if ($statusCode -eq 404) {
+                Write-Host "❌ Library does not exist at this key!"
+                Write-Host "This may indicate:"
+                Write-Host "  1. Wrong LIBRARY_KEY in secrets"
+                Write-Host "  2. Library was deleted"
+                Write-Host "  3. Insufficient API permissions"
+              }
+
+              Write-Host "`nContinuing anyway - the upload endpoint might still work..."
+              Write-Host ""
+            }
+
+            # ============================================================
+            # ATTEMPT 1: Library-specific endpoint (per Google docs)
+            # ============================================================
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Host "ATTEMPT 1: Library-Specific Endpoint"
+            Write-Host "════════════════════════════════════════════════════════════════"
+
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-library-generation/v1/libraries/$env:LIBRARY_KEY/uploads"
+
             $body = @{
               downloadUrl = $env:DOWNLOAD_URL
             } | ConvertTo-Json
 
-            Write-Host "📡 REQUEST:"
+            Write-Host "`n📡 REQUEST:"
             Write-Host "  Method: POST"
             Write-Host "  URL: $apiUrl"
             Write-Host "  Headers: Authorization: Bearer ***"
@@ -683,62 +726,190 @@ jobs:
             Write-Host $body
             Write-Host ""
 
-            Write-Host "🔄 Registering upload and creating new revision..."
-            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
+            Write-Host "🔄 Attempting library-specific endpoint..."
 
-            Write-Host "`n📋 RESPONSE:"
+            $response = $null
+            $endpointUsed = $null
+
+            try {
+              $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body -ErrorAction Stop
+              $endpointUsed = "library-specific"
+              Write-Host "✅ Library-specific endpoint succeeded!"
+
+            } catch {
+              $statusCode = $_.Exception.Response.StatusCode.value__
+              Write-Host "❌ Library-specific endpoint failed: HTTP $statusCode"
+
+              # Enhanced error logging
+              Write-Host "`n🔍 DETAILED ERROR INFORMATION:"
+              Write-Host "  Exception Type: $($_.Exception.GetType().FullName)"
+              Write-Host "  Error Message: $($_.Exception.Message)"
+              Write-Host "  HTTP Status: $statusCode $($_.Exception.Response.StatusDescription)"
+
+              if ($_.Exception.Response) {
+                Write-Host "`n  Response Headers:"
+                foreach ($header in $_.Exception.Response.Headers.AllKeys) {
+                  Write-Host "    $header: $($_.Exception.Response.Headers[$header])"
+                }
+
+                try {
+                  $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                  $errorBody = $reader.ReadToEnd()
+                  $reader.Close()
+
+                  Write-Host "`n  Response Body:"
+                  Write-Host "  $errorBody"
+
+                  # Try to parse as JSON for structured error
+                  try {
+                    $errorJson = $errorBody | ConvertFrom-Json
+                    Write-Host "`n  Parsed Error Details:"
+                    Write-Host "  $($errorJson | ConvertTo-Json -Depth 3)"
+                  } catch {
+                    Write-Host "  (Response is not JSON)"
+                  }
+                } catch {
+                  Write-Host "  Could not read response body"
+                }
+              }
+
+              # ============================================================
+              # ATTEMPT 2: Generic endpoint fallback
+              # ============================================================
+              if ($statusCode -eq 404) {
+                Write-Host ""
+                Write-Host "════════════════════════════════════════════════════════════════"
+                Write-Host "ATTEMPT 2: Generic Endpoint Fallback"
+                Write-Host "════════════════════════════════════════════════════════════════"
+                Write-Host ""
+                Write-Host "🔄 Trying generic generation endpoint..."
+
+                # Try the generic endpoint without library key
+                $genericUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-library-generation/v1/uploads"
+
+                # Need to include library key in body for generic endpoint
+                $genericBody = @{
+                  downloadUrl = $env:DOWNLOAD_URL
+                  libraryKey = $env:LIBRARY_KEY
+                } | ConvertTo-Json
+
+                Write-Host "📡 REQUEST (Generic):"
+                Write-Host "  Method: POST"
+                Write-Host "  URL: $genericUrl"
+                Write-Host "  Body:"
+                Write-Host $genericBody
+                Write-Host ""
+
+                try {
+                  $response = Invoke-RestMethod -Uri $genericUrl -Method Post -Headers $headers -Body $genericBody -ErrorAction Stop
+                  $endpointUsed = "generic"
+                  Write-Host "✅ Generic endpoint succeeded!"
+
+                } catch {
+                  Write-Host "❌ Generic endpoint also failed: HTTP $($_.Exception.Response.StatusCode.value__)"
+
+                  try {
+                    $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                    $errorBody = $reader.ReadToEnd()
+                    Write-Host "Error: $errorBody"
+                  } catch {}
+
+                  throw "Both library-specific and generic endpoints failed"
+                }
+              } else {
+                throw
+              }
+            }
+
+            # ============================================================
+            # PROCESS RESPONSE
+            # ============================================================
+            Write-Host ""
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Host "RESPONSE ANALYSIS"
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Host ""
+            Write-Host "Endpoint used: $endpointUsed"
+            Write-Host ""
+            Write-Host "📋 FULL RESPONSE:"
             Write-Host ($response | ConvertTo-Json -Depth 5)
             Write-Host ""
 
-            Write-Host "📤 EXTRACTED VALUES:"
-            Write-Host "  Response Properties: $($response.PSObject.Properties.Name -join ', ')"
+            Write-Host "📤 RESPONSE STRUCTURE:"
+            Write-Host "  Type: $($response.GetType().FullName)"
+            Write-Host "  Properties: $($response.PSObject.Properties.Name -join ', ')"
+            Write-Host ""
 
-            # Per official docs, this endpoint should return revisionNumber directly
+            # Extract all possible fields
             $revisionNumber = $response.revisionNumber
             $libraryKey = $response.libraryKey
             $assetKey = $response.assetKey
+            $operationKey = $response.operationKey
 
+            Write-Host "📤 EXTRACTED FIELDS:"
+            Write-Host "  revisionNumber: $(if($revisionNumber) {$revisionNumber} else {'<not found>'})"
+            Write-Host "  libraryKey: $(if($libraryKey) {$libraryKey} else {'<not found>'})"
+            Write-Host "  assetKey: $(if($assetKey) {$assetKey} else {'<not found>'})"
+            Write-Host "  operationKey: $(if($operationKey) {$operationKey} else {'<not found>'})"
+            Write-Host ""
+
+            # Check if we got a revision number
             if ([string]::IsNullOrEmpty($revisionNumber)) {
               Write-Host "❌ revisionNumber not found in response!"
-              Write-Host "Checking for async operation..."
 
-              $operationKey = $response.operationKey
               if ($operationKey) {
-                Write-Host "Found operationKey: $operationKey"
-                Write-Host "⚠️  API is async - this is UNEXPECTED per official docs"
-                Write-Host "The official API should return revisionNumber immediately"
-                throw "API returned async operation instead of revision - check library key or API version"
+                Write-Host "⚠️  API returned async operation (operationKey: $operationKey)"
+                Write-Host "This is UNEXPECTED per official docs - should be synchronous"
+                throw "API returned async operation instead of revision - polling not implemented"
               } else {
+                Write-Host "❌ No revisionNumber AND no operationKey!"
+                Write-Host "Cannot determine revision - API response is invalid"
                 throw "revisionNumber not found in response and no operationKey for polling"
               }
             }
 
-            Write-Host "  libraryKey: $(if($libraryKey) {$libraryKey} else {'NOT FOUND'})"
-            Write-Host "  assetKey: $(if($assetKey) {$assetKey} else {'NOT FOUND'})"
-            Write-Host "  revisionNumber: $revisionNumber"
+            Write-Host "✅ New revision created: $revisionNumber"
             Write-Host ""
 
-            Write-Host "✅ New revision created: $revisionNumber"
-
-            # Use assetKey if present, otherwise fall back to libraryKey
-            $finalAssetKey = if ($assetKey) { $assetKey } else { $libraryKey }
+            # Use assetKey if present, otherwise fall back to libraryKey from response, then input
+            $finalAssetKey = if ($assetKey) {
+              Write-Host "Using assetKey from response: $assetKey"
+              $assetKey
+            } elseif ($libraryKey) {
+              Write-Host "Using libraryKey from response: $libraryKey"
+              $libraryKey
+            } else {
+              Write-Host "Using LIBRARY_KEY from input: $env:LIBRARY_KEY"
+              $env:LIBRARY_KEY
+            }
 
             # Save for Step 5
             "LIBRARY_KEY=$finalAssetKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
             $stepDuration = (Get-Date) - $stepStart
-            Write-Host "⏱️  Step 4 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+            Write-Host ""
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Host "✅ STEP 4 COMPLETE"
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Host "Revision: $revisionNumber"
+            Write-Host "⏱️  Total time: $($stepDuration.TotalSeconds.ToString('F2'))s"
             Write-Host ""
 
           } catch {
-            Write-Error "❌ Step 4 failed: $($_.Exception.Message)"
-            if ($_.Exception.Response) {
-              try {
-                $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-                Write-Host "Error: $($reader.ReadToEnd())"
-              } catch {}
-            }
+            Write-Host ""
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Host "❌ STEP 4 FAILED"
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Error "Error: $($_.Exception.Message)"
+            Write-Host ""
+            Write-Host "🔍 TROUBLESHOOTING:"
+            Write-Host "1. Verify LIBRARY_KEY matches an existing library in ODC"
+            Write-Host "2. Check API client has 'Generate External Logic' permission"
+            Write-Host "3. Verify the library hasn't been deleted"
+            Write-Host "4. Check if ODC version supports these API endpoints"
+            Write-Host "5. Try creating a new library via ODC Portal first"
+            Write-Host ""
             exit 1
           }
 
