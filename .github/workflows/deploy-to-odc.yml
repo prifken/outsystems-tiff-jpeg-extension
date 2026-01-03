@@ -489,21 +489,23 @@ jobs:
         shell: pwsh
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
+          LIBRARY_KEY: ${{ secrets.ODC_LIBRARY_KEY }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 2: GET PRE-SIGNED UPLOAD URL"
+          Write-Host "STEP 2: GET PRE-SIGNED UPLOAD URL (UPDATE EXISTING LIBRARY)"
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/uploads"
-            Write-Host "📡 GET $apiUrl"
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-library-generation/v1/libraries/$env:LIBRARY_KEY/upload-url"
+            Write-Host "📡 POST $apiUrl"
+            Write-Host "Library Key: $env:LIBRARY_KEY"
 
             $headers = @{
               "Authorization" = "Bearer $env:ACCESS_TOKEN"
             }
 
-            $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers $headers
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
 
             $uploadUrl = $response.uploadUrl
             $downloadUrl = $response.downloadUrl
@@ -573,23 +575,25 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 4: Create Generation Operation
+      # STEP 4: Register Upload and Create New Revision
       # ========================================================================
-      - name: "Step 4: Create Generation Operation"
-        id: generation
+      - name: "Step 4: Register Upload and Create Revision"
+        id: create_revision
         shell: pwsh
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
+          LIBRARY_KEY: ${{ secrets.ODC_LIBRARY_KEY }}
           DOWNLOAD_URL: ${{ steps.upload_url.outputs.DOWNLOAD_URL }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 4: CREATE GENERATION OPERATION"
+          Write-Host "STEP 4: REGISTER UPLOAD AND CREATE NEW REVISION"
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/generation-operations"
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-library-generation/v1/libraries/$env:LIBRARY_KEY/uploads"
             Write-Host "📡 POST $apiUrl"
+            Write-Host "Library Key: $env:LIBRARY_KEY"
 
             $headers = @{
               "Authorization" = "Bearer $env:ACCESS_TOKEN"
@@ -597,167 +601,74 @@ jobs:
             }
 
             $body = @{
-              fileName = "${{ env.ZIP_FILE }}"
-              highCodeBinaryUri = $env:DOWNLOAD_URL
+              downloadUrl = $env:DOWNLOAD_URL
             } | ConvertTo-Json
+
+            Write-Host "`nRegistering upload and creating new revision..."
+            Write-Host "Body: $body"
 
             $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
 
-            # Log the response for debugging
-            Write-Host "`n📋 API Response:"
+            Write-Host "`n📋 Response:"
             Write-Host ($response | ConvertTo-Json -Depth 5)
-            Write-Host ""
 
-            $operationKey = $response.operationKey
+            $libraryKey = $response.libraryKey
+            $revisionNumber = $response.revisionNumber
 
-            if ([string]::IsNullOrEmpty($operationKey)) {
-              Write-Host "⚠️  Response structure:"
-              Write-Host "Response type: $($response.GetType().FullName)"
-              Write-Host "Properties: $($response.PSObject.Properties.Name -join ', ')"
-              throw "Missing operation key in response"
+            if ([string]::IsNullOrEmpty($libraryKey)) {
+              throw "libraryKey not found in response"
             }
 
-            "OPERATION_KEY=$operationKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            if ([string]::IsNullOrEmpty($revisionNumber)) {
+              throw "revisionNumber not found in response"
+            }
+
+            Write-Host "`n✅ New revision created!"
+            Write-Host "🔑 Library Key: $libraryKey"
+            Write-Host "📝 Revision Number: $revisionNumber"
+
+            # Save for Step 5 (tagging)
+            "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
             $stepDuration = (Get-Date) - $stepStart
-            Write-Host "✅ Generation operation created"
-            Write-Host "🔑 Operation Key: $operationKey"
             Write-Host "⏱️  Step 4 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
             Write-Host ""
 
           } catch {
             Write-Error "❌ Step 4 failed: $($_.Exception.Message)"
             if ($_.Exception.Response) {
-              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-              Write-Host "Error details: $($reader.ReadToEnd())"
+              try {
+                $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                Write-Host "Error: $($reader.ReadToEnd())"
+              } catch {}
             }
             exit 1
           }
 
       # ========================================================================
-      # STEP 5: Poll for Generation Completion
+      # STEP 5: Create New Release Version
       # ========================================================================
-      - name: "Step 5: Wait for Generation"
-        id: poll
-        shell: pwsh
-        env:
-          ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
-          OPERATION_KEY: ${{ steps.generation.outputs.OPERATION_KEY }}
-        run: |
-          $stepStart = Get-Date
-          Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 5: POLL FOR GENERATION COMPLETION"
-          Write-Host "════════════════════════════════════════════════════════════════"
-
-          try {
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/generation-operations/$env:OPERATION_KEY"
-            $headers = @{
-              "Authorization" = "Bearer $env:ACCESS_TOKEN"
-            }
-
-            $maxAttempts = 36  # 36 * 5s = 3 minutes
-            $attempt = 0
-            $status = ""
-
-            Write-Host "⏳ Polling for completion (max 3 minutes)..."
-
-            while ($attempt -lt $maxAttempts) {
-              $attempt++
-              Write-Host "[$attempt/$maxAttempts] Checking status..."
-
-              $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers $headers
-              $status = $response.status
-
-              Write-Host "Status: $status"
-
-              if ($status -eq "ReadyForReview") {
-                Write-Host "✅ Generation completed successfully!"
-
-                $libraryKey = $response.libraryKey
-                $libraryName = $response.libraryName
-
-                if ([string]::IsNullOrEmpty($libraryKey)) {
-                  throw "Library key not found in generation operation response"
-                }
-
-                Write-Host "🔑 Library Key: $libraryKey"
-                Write-Host "📚 Library Name: $libraryName"
-
-                # Generation API doesn't return revision number, so query for it
-                Write-Host "`n📡 Querying for newly created revision..."
-                $revisionsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$libraryKey/revisions"
-
-                $revisionsResponse = Invoke-RestMethod -Uri $revisionsUrl -Method Get -Headers $headers
-                $allRevisions = $revisionsResponse.results
-
-                Write-Host "Found $($allRevisions.Count) total revision(s)"
-
-                # Find the newest UNTAGGED revision (this should be the one we just created)
-                $untaggedRevisions = $allRevisions | Where-Object { -not $_.tag -or -not $_.taggedAt } | Sort-Object -Property revision -Descending
-
-                if ($untaggedRevisions.Count -gt 0) {
-                  $newRevision = $untaggedRevisions[0]
-                  $revisionNumber = $newRevision.revision
-                  Write-Host "✅ Found new untagged revision: $revisionNumber"
-                  Write-Host "   Created at: $($newRevision.createdAt)"
-                } else {
-                  # Fallback: just get the latest revision (might already be tagged from a previous failed run)
-                  $latestRevision = $allRevisions | Sort-Object -Property revision -Descending | Select-Object -First 1
-                  $revisionNumber = $latestRevision.revision
-                  Write-Host "⚠️  No untagged revisions found, using latest: $revisionNumber"
-                  Write-Host "   Tag: $($latestRevision.tag)"
-                  Write-Host "   This may indicate the revision was already tagged in a previous run."
-                }
-
-                # Save to outputs
-                "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-                "LIBRARY_NAME=$libraryName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-                "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-                Write-Host "`n📝 Revision Number: $revisionNumber"
-
-                $stepDuration = (Get-Date) - $stepStart
-                Write-Host "⏱️  Step 5 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
-                Write-Host ""
-                exit 0
-              }
-
-              if ($status -eq "Failed" -or $status -eq "Error") {
-                throw "Generation failed with status: $status"
-              }
-
-              Start-Sleep -Seconds 5
-            }
-
-            throw "Timeout waiting for generation (status: $status)"
-
-          } catch {
-            Write-Error "❌ Step 5 failed: $($_.Exception.Message)"
-            if ($_.Exception.Response) {
-              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-              Write-Host "Error details: $($reader.ReadToEnd())"
-            }
-            exit 1
-          }
-
-      # ========================================================================
-      # STEP 6: Create New Release Version
-      # ========================================================================
-      - name: "Step 6: Create New Release Version"
+      - name: "Step 5: Create New Release Version"
         id: release
         shell: pwsh
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
-          LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
+          LIBRARY_KEY: ${{ steps.create_revision.outputs.LIBRARY_KEY }}
+          REVISION_NUMBER: ${{ steps.create_revision.outputs.REVISION_NUMBER }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 6: CREATE NEW RELEASE VERSION"
+          Write-Host "STEP 5: CREATE NEW RELEASE VERSION"
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
+              Write-Host "🔑 Library Key: $env:LIBRARY_KEY"
+              Write-Host "📝 Revision Number: $env:REVISION_NUMBER"
+
+              # Query revisions to get existing tags for auto-increment
               $revisionsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY/revisions"
-              Write-Host "📡 GET $revisionsUrl"
+              Write-Host "`n📡 GET $revisionsUrl"
 
               $headers = @{
                   "Authorization" = "Bearer $env:ACCESS_TOKEN"
@@ -766,14 +677,10 @@ jobs:
               $response = Invoke-RestMethod -Uri $revisionsUrl -Method Get -Headers $headers
               $revisions = $response.results
 
-              Write-Host "`n📋 Found $($revisions.Count) revision(s)"
+              Write-Host "Found $($revisions.Count) total revision(s)"
 
-              # Get latest revision (we'll create a new version tag for it)
-              $latestRevision = $revisions | Sort-Object -Property revision -Descending | Select-Object -First 1
-              $revisionNumber = $latestRevision.revision
-
-              Write-Host "Latest revision: $revisionNumber"
-              Write-Host "Current tag: $($latestRevision.tag)"
+              # Use the revision number from Step 4
+              $revisionNumber = $env:REVISION_NUMBER
 
               # Calculate next version number based on ALL existing tags
               $allTags = $revisions | Where-Object { $_.tag } | Select-Object -ExpandProperty tag | Sort-Object -Descending
@@ -843,14 +750,14 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 7: Complete - Library Tagged and Ready
+      # STEP 6: Deployment Complete
       # ========================================================================
-      - name: "Step 7: Deployment Complete"
+      - name: "Step 6: Deployment Complete"
         id: deploy
         shell: pwsh
         env:
           VERSION_TAG: ${{ steps.release.outputs.VERSION_TAG }}
-          LIBRARY_NAME: ${{ steps.poll.outputs.LIBRARY_NAME }}
+          LIBRARY_NAME: ImageConverter
         run: |
           Write-Host "════════════════════════════════════════════════════════════════"
           Write-Host "🎉 DEPLOYMENT COMPLETE!"
@@ -879,8 +786,8 @@ jobs:
         if: success()
         shell: pwsh
         env:
-          LIBRARY_NAME: ${{ steps.poll.outputs.LIBRARY_NAME }}
-          LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
+          LIBRARY_NAME: ImageConverter
+          LIBRARY_KEY: ${{ steps.create_revision.outputs.LIBRARY_KEY }}
           REVISION_NUMBER: ${{ steps.release.outputs.REVISION_NUMBER }}
           VERSION_TAG: ${{ steps.release.outputs.VERSION_TAG }}
         run: |
