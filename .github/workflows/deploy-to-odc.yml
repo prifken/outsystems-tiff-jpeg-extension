@@ -80,18 +80,40 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_FILE }}
 
-      # Step 6: Build the project in Release configuration
+      # Step 6: Build the project in Release configuration with unique version
       - name: Build project
-        run: dotnet build ${{ env.PROJECT_FILE }} --configuration Release --no-restore
+        shell: pwsh
+        run: |
+          Write-Host "Building with version 0.1.${{ github.run_number }}..."
+
+          dotnet build ${{ env.PROJECT_FILE }} `
+            --configuration Release `
+            --no-restore `
+            -p:Version=0.1.${{ github.run_number }} `
+            -p:AssemblyVersion=0.1.${{ github.run_number }}.0 `
+            -p:FileVersion=0.1.${{ github.run_number }}.0 `
+            -p:Deterministic=false
+
+          Write-Host "✅ Build completed with unique version"
 
       # Step 7: Publish the project for linux-x64 runtime (ODC Lambda target)
       - name: Publish project
+        shell: pwsh
         run: |
+          Write-Host "Publishing library with version 0.1.${{ github.run_number }}..."
+
           dotnet publish ${{ env.PROJECT_FILE }} `
             --configuration Release `
             --runtime linux-x64 `
             --output ./publish `
-            --no-build
+            --no-build `
+            -p:Version=0.1.${{ github.run_number }} `
+            -p:AssemblyVersion=0.1.${{ github.run_number }}.0 `
+            -p:FileVersion=0.1.${{ github.run_number }}.0 `
+            -p:Deterministic=false
+
+          Write-Host "✅ Publish completed"
+          Write-Host "Version: 0.1.${{ github.run_number }}"
 
       # Step 8: Create ZIP archive for ODC deployment
       - name: Create deployment package
