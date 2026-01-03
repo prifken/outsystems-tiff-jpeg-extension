@@ -2,6 +2,9 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using Amazon.Runtime;
 using System.Text;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Processing;
 
 namespace ImageConverterLibrary;
 
@@ -66,22 +69,108 @@ public class ImageConverter : IImageConverter
 
     /// <summary>
     /// Converts a TIFF file to JPEG format
-    /// TODO: Implement TIFF to JPEG conversion logic
+    /// Supports both single-page and multi-page TIFF files
     /// </summary>
     /// <param name="inputPath">Path to input TIFF file</param>
-    /// <param name="outputPath">Path for output JPEG file</param>
+    /// <param name="outputPath">Path for output JPEG file (or base path for multi-page TIFFs)</param>
     /// <param name="quality">JPEG quality (1-100)</param>
     /// <returns>Conversion operation result</returns>
     public ConversionResult ConvertTiffToJpeg(string inputPath, string outputPath, int quality = 85)
     {
-        // Placeholder implementation - to be completed in future iteration
-        return new ConversionResult
+        try
         {
-            Success = false,
-            Message = "ConvertTiffToJpeg not yet implemented",
-            OutputPath = string.Empty,
-            PagesConverted = 0
-        };
+            // Validate inputs
+            if (string.IsNullOrWhiteSpace(inputPath))
+                return new ConversionResult { Success = false, Message = "Input path cannot be empty" };
+
+            if (string.IsNullOrWhiteSpace(outputPath))
+                return new ConversionResult { Success = false, Message = "Output path cannot be empty" };
+
+            if (!File.Exists(inputPath))
+                return new ConversionResult { Success = false, Message = $"Input file not found: {inputPath}" };
+
+            // Validate quality range
+            if (quality < 1 || quality > 100)
+                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100" };
+
+            // Load the TIFF image
+            using var image = Image.Load(inputPath);
+
+            int frameCount = image.Frames.Count;
+            var outputPaths = new List<string>();
+
+            // Configure JPEG encoder with specified quality
+            var jpegEncoder = new JpegEncoder
+            {
+                Quality = quality
+            };
+
+            if (frameCount == 1)
+            {
+                // Single-page TIFF: save directly to outputPath
+                image.Save(outputPath, jpegEncoder);
+                outputPaths.Add(outputPath);
+
+                return new ConversionResult
+                {
+                    Success = true,
+                    Message = $"Successfully converted single-page TIFF to JPEG (quality: {quality})",
+                    OutputPath = outputPath,
+                    PagesConverted = 1
+                };
+            }
+            else
+            {
+                // Multi-page TIFF: save each frame as separate JPEG
+                // Generate output filenames: outputPath_1.jpg, outputPath_2.jpg, etc.
+                var directory = Path.GetDirectoryName(outputPath) ?? string.Empty;
+                var fileNameWithoutExt = Path.GetFileNameWithoutExtension(outputPath);
+                var extension = ".jpg";
+
+                for (int i = 0; i < frameCount; i++)
+                {
+                    var frameOutputPath = Path.Combine(directory, $"{fileNameWithoutExt}_page{i + 1}{extension}");
+
+                    // Clone the specific frame and save it
+                    using var frameImage = image.Frames.CloneFrame(i);
+                    using var singleFrameImage = frameImage.CloneAs<SixLabors.ImageSharp.PixelFormats.Rgba32>();
+                    singleFrameImage.Save(frameOutputPath, jpegEncoder);
+
+                    outputPaths.Add(frameOutputPath);
+                }
+
+                var firstOutputPath = outputPaths.First();
+                var allPaths = string.Join(", ", outputPaths);
+
+                return new ConversionResult
+                {
+                    Success = true,
+                    Message = $"Successfully converted {frameCount}-page TIFF to {frameCount} JPEG files (quality: {quality}). Files: {allPaths}",
+                    OutputPath = firstOutputPath,
+                    PagesConverted = frameCount
+                };
+            }
+        }
+        catch (UnknownImageFormatException ex)
+        {
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"Invalid image format: {ex.Message}. Ensure the input file is a valid TIFF.",
+                OutputPath = string.Empty,
+                PagesConverted = 0
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"Conversion error: {ex.Message}",
+                OutputPath = string.Empty,
+                PagesConverted = 0
+            };
+        }
     }
 
     /// <summary>

@@ -22,6 +22,9 @@
 
     <!-- AWS SDK for S3 operations -->
     <PackageReference Include="AWSSDK.S3" Version="3.7.400" />
+
+    <!-- Image processing library for TIFF to JPEG conversion -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.6" />
   </ItemGroup>
 
 </Project>
