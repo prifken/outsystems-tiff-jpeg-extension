@@ -807,30 +807,45 @@ jobs:
                 Write-Host ""
                 break
               } elseif ($status -eq "ReadyForReview") {
-                Write-Host "`n⚠️  Library is ready for review!"
+                Write-Host "`n⚠️  Library upload successful - Manual approval required!"
                 Write-Host ""
                 Write-Host "📋 RESPONSE:"
                 Write-Host ($response | ConvertTo-Json -Depth 5)
                 Write-Host ""
-                Write-Host "The library has been generated but is in 'ReadyForReview' status."
-                Write-Host "This may require manual approval in the ODC Portal."
+                Write-Host "════════════════════════════════════════════════════════════════"
+                Write-Host "📝 MANUAL APPROVAL REQUIRED"
+                Write-Host "════════════════════════════════════════════════════════════════"
+                Write-Host ""
+                Write-Host "The library has been uploaded and processed successfully,"
+                Write-Host "but OutSystems requires manual review before creating a revision."
+                Write-Host ""
+                Write-Host "🔗 NEXT STEPS:"
+                Write-Host "1. Go to ODC Portal: ${{ secrets.ODC_PORTAL_URL }}"
+                Write-Host "2. Navigate to: Libraries → External Libraries"
+                Write-Host "3. Look for 'ImageConverter' with status 'Ready for Review'"
+
+                # Extract library review URI if available
+                $libraryUri = $response.libraryUri
+                if (-not [string]::IsNullOrEmpty($libraryUri)) {
+                  Write-Host "4. Direct link: $libraryUri"
+                  "LIBRARY_URI=$libraryUri" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                }
+
+                Write-Host ""
+                Write-Host "5. Review the library contents"
+                Write-Host "6. Click 'Approve' to create the new revision"
+                Write-Host ""
+                Write-Host "After approval, the library revision will be created and ready to use."
+                Write-Host ""
+                Write-Host "Note: This is a security feature - OutSystems reviews all external"
+                Write-Host "      library code before allowing it to run in your environment."
+                Write-Host ""
+                Write-Host "════════════════════════════════════════════════════════════════"
                 Write-Host ""
 
-                if ([string]::IsNullOrEmpty($libraryKey)) {
-                  Write-Host "⚠️  No libraryKey in response - library may need approval first"
-                  Write-Host ""
-                  Write-Host "ACTION REQUIRED:"
-                  Write-Host "1. Go to ODC Portal → Libraries"
-                  Write-Host "2. Find and review the library"
-                  Write-Host "3. Approve it manually"
-                  Write-Host ""
-                  throw "Library is ReadyForReview but has no libraryKey - manual approval may be required"
-                } else {
-                  Write-Host "✅ libraryKey found in ReadyForReview response: $libraryKey"
-                  Write-Host "Proceeding with deployment..."
-                  Write-Host ""
-                  break
-                }
+                # Mark this as successful completion even without libraryKey
+                # The upload is done, just needs manual approval
+                break
               } elseif ($status -eq "Failed") {
                 Write-Host "`n❌ Generation failed!"
                 Write-Host "Response:"
@@ -853,21 +868,38 @@ jobs:
               throw "Generation did not complete within timeout period (5 minutes). Final status: $status"
             }
 
-            if ([string]::IsNullOrEmpty($libraryKey)) {
-              throw "No libraryKey in completed response"
+            # Save status for conditional steps
+            "STATUS=$status" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+            # For ReadyForReview, libraryKey may be empty (approval needed first)
+            # For Completed, libraryKey should always be present
+            if ($status -eq "Completed") {
+              if ([string]::IsNullOrEmpty($libraryKey)) {
+                throw "Status is Completed but no libraryKey in response"
+              }
+              Write-Host "📤 LIBRARY KEY: $libraryKey"
+            } elseif ($status -eq "ReadyForReview") {
+              if ([string]::IsNullOrEmpty($libraryKey)) {
+                Write-Host "📤 LIBRARY KEY: <will be assigned after manual approval>"
+              } else {
+                Write-Host "📤 LIBRARY KEY: $libraryKey"
+              }
             }
 
-            Write-Host "📤 LIBRARY KEY: $libraryKey"
-
-            # Save library key for next step
-            "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            # Save library key if present (may be empty for ReadyForReview)
+            if (-not [string]::IsNullOrEmpty($libraryKey)) {
+              "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            }
 
             $stepDuration = (Get-Date) - $stepStart
             Write-Host ""
             Write-Host "════════════════════════════════════════════════════════════════"
             Write-Host "✅ STEP 5 COMPLETE"
             Write-Host "════════════════════════════════════════════════════════════════"
-            Write-Host "Library Key: $libraryKey"
+            Write-Host "Status: $status"
+            if (-not [string]::IsNullOrEmpty($libraryKey)) {
+              Write-Host "Library Key: $libraryKey"
+            }
             Write-Host "⏱️  Total time: $($stepDuration.TotalSeconds.ToString('F2'))s"
             Write-Host ""
 
@@ -896,6 +928,7 @@ jobs:
       # ========================================================================
       - name: "Step 6: Tag Library Revision"
         id: tag_revision
+        if: steps.poll_operation.outputs.STATUS == 'Completed'
         shell: pwsh
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
@@ -1041,10 +1074,11 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 7: Deployment Complete
+      # STEP 7: Deployment Complete (Completed Status)
       # ========================================================================
       - name: "Step 7: Deployment Complete"
-        id: deploy
+        id: deploy_completed
+        if: steps.poll_operation.outputs.STATUS == 'Completed'
         shell: pwsh
         env:
           VERSION_TAG: ${{ steps.tag_revision.outputs.VERSION_TAG }}
@@ -1071,10 +1105,53 @@ jobs:
           Write-Host ""
 
       # ========================================================================
-      # SUCCESS SUMMARY
+      # STEP 7 (Alternative): Awaiting Manual Approval (ReadyForReview Status)
       # ========================================================================
-      - name: Deployment Summary
-        if: success()
+      - name: "Step 7: Awaiting Manual Approval"
+        id: deploy_review
+        if: steps.poll_operation.outputs.STATUS == 'ReadyForReview'
+        shell: pwsh
+        env:
+          LIBRARY_NAME: ImageConverter
+          LIBRARY_URI: ${{ steps.poll_operation.outputs.LIBRARY_URI }}
+        run: |
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "⏸️  UPLOAD COMPLETE - AWAITING APPROVAL"
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host ""
+          Write-Host "Library has been successfully:"
+          Write-Host "✅ Uploaded to ODC"
+          Write-Host "✅ Generated and processed"
+          Write-Host "⏸️  Waiting for manual security review"
+          Write-Host ""
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "📝 ACTION REQUIRED: Manual Approval Needed"
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host ""
+          Write-Host "OutSystems requires security review of external libraries."
+          Write-Host "Please review and approve in the ODC Portal to complete deployment."
+          Write-Host ""
+          Write-Host "🔗 APPROVAL STEPS:"
+          Write-Host "1. Go to: ${{ secrets.ODC_PORTAL_URL }}"
+          Write-Host "2. Navigate to: Libraries → External Libraries"
+          Write-Host "3. Find: '$env:LIBRARY_NAME' (Ready for Review)"
+          if (-not [string]::IsNullOrEmpty($env:LIBRARY_URI)) {
+            Write-Host "4. Or use direct link: $env:LIBRARY_URI"
+          }
+          Write-Host ""
+          Write-Host "After approval:"
+          Write-Host "- A new library revision will be created"
+          Write-Host "- You can tag the revision with a version number"
+          Write-Host "- The library will be ready to use in your apps"
+          Write-Host ""
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host ""
+
+      # ========================================================================
+      # SUCCESS SUMMARY - Completed
+      # ========================================================================
+      - name: Deployment Summary (Completed)
+        if: success() && steps.poll_operation.outputs.STATUS == 'Completed'
         shell: pwsh
         env:
           LIBRARY_NAME: ImageConverter
@@ -1099,6 +1176,44 @@ jobs:
           Write-Output "✅ All 7 deployment steps completed successfully!" >> $env:GITHUB_STEP_SUMMARY
 
       # ========================================================================
+      # SUCCESS SUMMARY - Ready for Review
+      # ========================================================================
+      - name: Deployment Summary (Awaiting Approval)
+        if: success() && steps.poll_operation.outputs.STATUS == 'ReadyForReview'
+        shell: pwsh
+        env:
+          LIBRARY_NAME: ImageConverter
+          LIBRARY_URI: ${{ steps.poll_operation.outputs.LIBRARY_URI }}
+        run: |
+          Write-Output "## ⏸️ Upload Successful - Approval Required" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "The library has been uploaded and processed successfully, but OutSystems requires manual security review before creating a revision." >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "### 📝 Next Steps - Manual Approval Required" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "1. Go to [ODC Portal](${{ secrets.ODC_PORTAL_URL }})" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "2. Navigate to **Libraries → External Libraries**" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "3. Find **$env:LIBRARY_NAME** with status \"Ready for Review\"" >> $env:GITHUB_STEP_SUMMARY
+
+          if (-not [string]::IsNullOrEmpty($env:LIBRARY_URI)) {
+            Write-Output "4. Or use [direct link]($env:LIBRARY_URI)" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "### What happens after approval?" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- A new library revision will be created" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- You can tag the revision with a version number" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- The library will be ready to use in your applications" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "### Upload Details" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Portal:** ${{ secrets.ODC_PORTAL_URL }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Uploaded:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Run:** #${{ github.run_number }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "✅ Upload complete - awaiting manual approval" >> $env:GITHUB_STEP_SUMMARY
+
+      # ========================================================================
       # FAILURE SUMMARY
       # ========================================================================
       - name: Deployment Failure Summary
@@ -1115,6 +1230,6 @@ jobs:
           Write-Output "- **Step 2:** API permissions or endpoint not available" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "- **Step 3:** S3 upload failure or network issues" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "- **Step 4:** Invalid ZIP package or generation request" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- **Step 5:** Generation timeout or compilation errors" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- **Step 6:** Release creation failure" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- **Step 7:** Deployment to stage failure" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 5:** Generation timeout, compilation errors, or ReadyForReview status handling" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 6:** Release tagging failure (only runs if status is Completed)" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 7:** Summary generation failure" >> $env:GITHUB_STEP_SUMMARY
