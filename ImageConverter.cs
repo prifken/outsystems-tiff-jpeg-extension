@@ -687,6 +687,101 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
+    /// Generates a pre-signed S3 URL for direct browser upload
+    /// Bypasses OutSystems 5.5MB payload limit by allowing direct browser to S3 upload
+    /// </summary>
+    public S3UploadUrlResult GenerateS3UploadUrl(
+        string bucketName,
+        string s3Key,
+        string awsAccessKey,
+        string awsSecretKey,
+        string awsRegion = "us-east-1",
+        int expirationMinutes = 15)
+    {
+        try
+        {
+            // Validate inputs
+            if (string.IsNullOrWhiteSpace(bucketName))
+                return new S3UploadUrlResult
+                {
+                    Success = false,
+                    Message = "Bucket name cannot be empty",
+                    UploadUrl = string.Empty,
+                    S3Key = string.Empty,
+                    ExpiresAt = string.Empty
+                };
+
+            if (string.IsNullOrWhiteSpace(s3Key))
+                return new S3UploadUrlResult
+                {
+                    Success = false,
+                    Message = "S3 key cannot be empty",
+                    UploadUrl = string.Empty,
+                    S3Key = string.Empty,
+                    ExpiresAt = string.Empty
+                };
+
+            if (expirationMinutes < 1 || expirationMinutes > 1440)
+                return new S3UploadUrlResult
+                {
+                    Success = false,
+                    Message = "Expiration must be between 1 and 1440 minutes (24 hours)",
+                    UploadUrl = string.Empty,
+                    S3Key = string.Empty,
+                    ExpiresAt = string.Empty
+                };
+
+            // Create S3 client
+            var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
+            var regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
+            using var s3Client = new AmazonS3Client(credentials, regionEndpoint);
+
+            // Generate pre-signed URL for PUT operation
+            var expiresAt = DateTime.UtcNow.AddMinutes(expirationMinutes);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName = bucketName,
+                Key = s3Key,
+                Verb = HttpVerb.PUT,
+                Expires = expiresAt
+            };
+
+            string uploadUrl = s3Client.GetPreSignedURL(request);
+
+            return new S3UploadUrlResult
+            {
+                Success = true,
+                Message = $"Pre-signed upload URL generated successfully. Expires in {expirationMinutes} minutes.",
+                UploadUrl = uploadUrl,
+                S3Key = s3Key,
+                ExpiresAt = expiresAt.ToString("yyyy-MM-dd HH:mm:ss UTC")
+            };
+        }
+        catch (AmazonS3Exception s3Ex)
+        {
+            return new S3UploadUrlResult
+            {
+                Success = false,
+                Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
+                UploadUrl = string.Empty,
+                S3Key = s3Key,
+                ExpiresAt = string.Empty
+            };
+        }
+        catch (Exception ex)
+        {
+            return new S3UploadUrlResult
+            {
+                Success = false,
+                Message = $"Error generating upload URL: {ex.Message}",
+                UploadUrl = string.Empty,
+                S3Key = s3Key,
+                ExpiresAt = string.Empty
+            };
+        }
+    }
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>

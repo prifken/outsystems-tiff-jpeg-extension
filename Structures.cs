@@ -100,3 +100,40 @@ public struct ConversionResult
         IsMandatory = false)]
     public string DetailedLog;
 }
+
+/// <summary>
+/// Result structure for S3 pre-signed upload URL generation
+/// </summary>
+[OSStructure(Description = "Pre-signed S3 upload URL for direct browser uploads")]
+public struct S3UploadUrlResult
+{
+    [OSStructureField(
+        Description = "Indicates if URL generation was successful",
+        DataType = OSDataType.Boolean,
+        IsMandatory = true)]
+    public bool Success;
+
+    [OSStructureField(
+        Description = "Status message or error details",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string Message;
+
+    [OSStructureField(
+        Description = "Pre-signed URL for uploading (PUT request)",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string UploadUrl;
+
+    [OSStructureField(
+        Description = "S3 key where file will be uploaded",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string S3Key;
+
+    [OSStructureField(
+        Description = "URL expiration time (UTC)",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string ExpiresAt;
+}

@@ -145,6 +145,53 @@ public interface IImageConverter
         int quality = 85);
 
     /// <summary>
+    /// Generates a pre-signed S3 URL for direct browser upload
+    /// Allows large file uploads without going through OutSystems server
+    /// </summary>
+    /// <param name="bucketName">S3 bucket name</param>
+    /// <param name="s3Key">S3 key for the file (e.g., 'uploads/document.tiff')</param>
+    /// <param name="awsAccessKey">AWS Access Key ID</param>
+    /// <param name="awsSecretKey">AWS Secret Access Key</param>
+    /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
+    /// <param name="expirationMinutes">URL expiration time in minutes (default: 15)</param>
+    /// <returns>Pre-signed upload URL result</returns>
+    [OSAction(
+        Description = "Generate pre-signed S3 upload URL for direct browser upload (bypasses 5.5MB limit)",
+        ReturnName = "result",
+        ReturnDescription = "Pre-signed URL result with upload URL and expiration",
+        ReturnType = OSDataType.InferredFromDotNetType)]
+    S3UploadUrlResult GenerateS3UploadUrl(
+        [OSParameter(
+            Description = "S3 bucket name",
+            DataType = OSDataType.Text)]
+        string bucketName,
+
+        [OSParameter(
+            Description = "S3 key for upload (e.g., 'uploads/document.tiff')",
+            DataType = OSDataType.Text)]
+        string s3Key,
+
+        [OSParameter(
+            Description = "AWS Access Key ID",
+            DataType = OSDataType.Text)]
+        string awsAccessKey,
+
+        [OSParameter(
+            Description = "AWS Secret Access Key",
+            DataType = OSDataType.Text)]
+        string awsSecretKey,
+
+        [OSParameter(
+            Description = "AWS Region (default: us-east-1)",
+            DataType = OSDataType.Text)]
+        string awsRegion = "us-east-1",
+
+        [OSParameter(
+            Description = "URL expiration in minutes (default: 15)",
+            DataType = OSDataType.Integer)]
+        int expirationMinutes = 15);
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>
