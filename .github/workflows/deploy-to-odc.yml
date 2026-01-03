@@ -45,15 +45,46 @@ jobs:
       - name: Display .NET version
         run: dotnet --version
 
-      # Step 4: Restore NuGet dependencies
+      # Step 4: Inject Build Metadata
+      - name: Inject Build Metadata
+        shell: pwsh
+        run: |
+          $buildId = "${{ github.run_number }}-${{ github.sha }}"
+          $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC")
+
+          Write-Host "Injecting build metadata:"
+          Write-Host "  Build ID: $buildId"
+          Write-Host "  Timestamp: $timestamp"
+
+          # Update AssemblyInfo or add build constant
+          $assemblyInfoPath = "Properties/AssemblyInfo.cs"
+
+          if (Test-Path $assemblyInfoPath) {
+            # Add to existing AssemblyInfo
+            Add-Content $assemblyInfoPath "`n[assembly: AssemblyMetadata(`"BuildId`", `"$buildId`")]"
+            Add-Content $assemblyInfoPath "[assembly: AssemblyMetadata(`"BuildTimestamp`", `"$timestamp`")]"
+          } else {
+            # Create AssemblyInfo.cs
+            New-Item -ItemType Directory -Force -Path "Properties" | Out-Null
+            @"
+          using System.Reflection;
+
+          [assembly: AssemblyMetadata("BuildId", "$buildId")]
+          [assembly: AssemblyMetadata("BuildTimestamp", "$timestamp")]
+          "@ | Out-File -FilePath $assemblyInfoPath -Encoding UTF8
+          }
+
+          Write-Host "✅ Build metadata injected"
+
+      # Step 5: Restore NuGet dependencies
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_FILE }}
 
-      # Step 5: Build the project in Release configuration
+      # Step 6: Build the project in Release configuration
       - name: Build project
         run: dotnet build ${{ env.PROJECT_FILE }} --configuration Release --no-restore
 
-      # Step 6: Publish the project for linux-x64 runtime (ODC Lambda target)
+      # Step 7: Publish the project for linux-x64 runtime (ODC Lambda target)
       - name: Publish project
         run: |
           dotnet publish ${{ env.PROJECT_FILE }} `
@@ -62,7 +93,7 @@ jobs:
             --output ./publish `
             --no-build
 
-      # Step 7: Create ZIP archive for ODC deployment
+      # Step 8: Create ZIP archive for ODC deployment
       - name: Create deployment package
         shell: pwsh
         run: |
@@ -87,7 +118,7 @@ jobs:
             exit 1
           }
 
-      # Step 8: Upload ZIP artifact for deployment job
+      # Step 9: Upload ZIP artifact for deployment job
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -96,7 +127,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # Step 9: Add build summary
+      # Step 10: Add build summary
       - name: Build summary
         shell: pwsh
         run: |
