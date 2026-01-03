@@ -618,13 +618,36 @@ jobs:
               Write-Host "Status: $status"
 
               if ($status -eq "ReadyForReview") {
+                Write-Host "✅ Generation completed successfully!"
+
+                # Log the FULL response to see what's available
+                Write-Host "`n📋 FULL Generation Operation Response:"
+                Write-Host ($response | ConvertTo-Json -Depth 5)
+                Write-Host ""
+
+                # Try to extract library information
                 $libraryKey = $response.libraryKey
                 $libraryName = $response.libraryName
                 $revisionNumber = $response.revisionNumber
 
+                # Also check for other possible property names
+                Write-Host "📊 Extracted Values:"
+                Write-Host "libraryKey property: $libraryKey"
+                Write-Host "libraryName property: $libraryName"
+                Write-Host "revisionNumber property: $revisionNumber"
+                Write-Host ""
+
+                Write-Host "🔍 All Available Properties:"
+                Write-Host ($response.PSObject.Properties.Name -join ', ')
+                Write-Host ""
+
                 if ([string]::IsNullOrEmpty($libraryKey)) {
-                  throw "Missing libraryKey in response"
+                  throw "Library key not found in generation operation response"
                 }
+
+                Write-Host "🔑 Library Key: $libraryKey"
+                Write-Host "📚 Library Name: $libraryName"
+                Write-Host "📝 Revision Number from API: $revisionNumber"
 
                 "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
                 "LIBRARY_NAME=$libraryName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -632,17 +655,16 @@ jobs:
                 # Capture revision number if present (default to "1" if not in response)
                 if (-not [string]::IsNullOrEmpty($revisionNumber)) {
                   "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                  Write-Host "✅ Using revision number from generation response: $revisionNumber"
                 } else {
                   "REVISION_NUMBER=1" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
                   $revisionNumber = "1"
+                  Write-Host "⚠️  WARNING: revisionNumber not in response, defaulting to: $revisionNumber"
+                  Write-Host "⚠️  This may indicate the generation operation doesn't return the new revision number!"
                 }
 
                 $stepDuration = (Get-Date) - $stepStart
                 Write-Host ""
-                Write-Host "✅ Generation completed successfully!"
-                Write-Host "🔑 Library Key: $libraryKey"
-                Write-Host "📚 Library Name: $libraryName"
-                Write-Host "📝 Revision Number: $revisionNumber"
                 Write-Host "⏱️  Step 5 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
                 Write-Host ""
                 exit 0
