@@ -749,7 +749,7 @@ jobs:
               if ($_.Exception.Response) {
                 Write-Host "`n  Response Headers:"
                 foreach ($header in $_.Exception.Response.Headers.AllKeys) {
-                  Write-Host "    $header: $($_.Exception.Response.Headers[$header])"
+                  Write-Host "    ${header}: $($_.Exception.Response.Headers[$header])"
                 }
 
                 try {
