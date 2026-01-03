@@ -508,12 +508,18 @@ jobs:
           Write-Host "`n📥 INPUTS:"
           Write-Host "  ACCESS_TOKEN: $(if($env:ACCESS_TOKEN) {'***SET***'} else {'NOT SET'})"
           Write-Host "  LIBRARY_KEY: $env:LIBRARY_KEY"
+          Write-Host "  LIBRARY_KEY Length: $($env:LIBRARY_KEY.Length) chars"
+          Write-Host "  LIBRARY_KEY Format: $(if($env:LIBRARY_KEY -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {'Valid GUID'} else {'Invalid GUID format'})"
           Write-Host ""
 
           try {
+            Write-Host "⚠️  ATTEMPTING LIBRARY-SPECIFIC ENDPOINT (per Google docs)..."
+            Write-Host "   This may return 404 if library doesn't exist or endpoint unavailable"
+            Write-Host ""
+
             # Official API Step 1: POST /api/external-library-generation/v1/libraries/{libraryKey}/upload-url
             $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-library-generation/v1/libraries/$env:LIBRARY_KEY/upload-url"
-            Write-Host "📡 REQUEST:"
+            Write-Host "📡 REQUEST (Attempt 1 - Library-Specific):"
             Write-Host "  Method: POST"
             Write-Host "  URL: $apiUrl"
             Write-Host "  Headers: Authorization: Bearer ***"
@@ -524,7 +530,29 @@ jobs:
               "Authorization" = "Bearer $env:ACCESS_TOKEN"
             }
 
-            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
+            try {
+              $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
+              Write-Host "✅ Library-specific endpoint worked!"
+            } catch {
+              if ($_.Exception.Response.StatusCode.value__ -eq 404) {
+                Write-Host "❌ 404 - Library-specific endpoint not found"
+                Write-Host ""
+                Write-Host "🔄 FALLBACK: Trying generic endpoint..."
+                Write-Host ""
+
+                # Fallback to generic endpoint
+                $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/uploads"
+                Write-Host "📡 REQUEST (Attempt 2 - Generic):"
+                Write-Host "  Method: GET"
+                Write-Host "  URL: $apiUrl"
+                Write-Host ""
+
+                $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers $headers
+                Write-Host "✅ Generic endpoint worked!"
+              } else {
+                throw
+              }
+            }
 
             Write-Host "📋 RESPONSE:"
             Write-Host ($response | ConvertTo-Json -Depth 3)
