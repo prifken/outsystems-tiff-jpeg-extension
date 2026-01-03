@@ -897,13 +897,42 @@ jobs:
               Write-Host "Found $($revisions.Count) total revision(s)"
               Write-Host ""
 
+              # Debug: Show first revision structure
+              if ($revisions.Count -gt 0) {
+                Write-Host "📋 FIRST REVISION STRUCTURE:"
+                Write-Host ($revisions[0] | ConvertTo-Json -Depth 3)
+                Write-Host ""
+                Write-Host "Available properties: $($revisions[0].PSObject.Properties.Name -join ', ')"
+                Write-Host ""
+              }
+
               # Get the latest revision (highest revision number)
-              $latestRevision = $revisions | Sort-Object -Property revisionNumber -Descending | Select-Object -First 1
-              $revisionNumber = $latestRevision.revisionNumber
+              # Try different possible property names
+              $latestRevision = $revisions | Sort-Object -Property @{Expression={
+                if ($_.revisionNumber) { $_.revisionNumber }
+                elseif ($_.RevisionNumber) { $_.RevisionNumber }
+                elseif ($_.revision) { $_.revision }
+                elseif ($_.number) { $_.number }
+                else { 0 }
+              }} -Descending | Select-Object -First 1
+
+              # Extract revision number trying different property names
+              $revisionNumber = if ($latestRevision.revisionNumber) { $latestRevision.revisionNumber }
+                               elseif ($latestRevision.RevisionNumber) { $latestRevision.RevisionNumber }
+                               elseif ($latestRevision.revision) { $latestRevision.revision }
+                               elseif ($latestRevision.number) { $latestRevision.number }
+                               else { $null }
 
               Write-Host "Latest revision number: $revisionNumber"
               Write-Host "Current tag: $(if($latestRevision.tag) {$latestRevision.tag} else {'<none>'})"
               Write-Host ""
+
+              if ([string]::IsNullOrEmpty($revisionNumber) -or $revisionNumber -eq 0) {
+                Write-Host "❌ Could not determine revision number!"
+                Write-Host "Latest revision object:"
+                Write-Host ($latestRevision | ConvertTo-Json -Depth 3)
+                throw "Unable to extract revision number from API response"
+              }
 
               # Calculate next version number based on ALL existing tags
               $allTags = $revisions | Where-Object { $_.tag } | Select-Object -ExpandProperty tag | Sort-Object -Descending
