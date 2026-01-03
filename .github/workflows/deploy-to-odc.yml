@@ -153,9 +153,23 @@ jobs:
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-            # Use direct token endpoint (OIDC Discovery not publicly accessible)
-            $tokenEndpoint = "${{ secrets.ODC_PORTAL_URL }}/identity/connect/token"
-            Write-Host "🔐 Token endpoint: $tokenEndpoint"
+            # Try OIDC Discovery first to get token endpoint dynamically
+            try {
+              $discoveryUrl = "${{ secrets.ODC_PORTAL_URL }}/identity/.well-known/openid-configuration"
+              Write-Host "🔍 Fetching OIDC Discovery: $discoveryUrl"
+              $discovery = Invoke-RestMethod -Uri $discoveryUrl -Method Get
+              $tokenEndpoint = $discovery.token_endpoint
+              Write-Host "✅ Token endpoint from discovery: $tokenEndpoint"
+            } catch {
+              # Fallback: Use the known token endpoint directly (in case of network/firewall restrictions)
+              Write-Host "⚠️  OIDC Discovery failed, using direct endpoint"
+              $tokenEndpoint = "${{ secrets.ODC_PORTAL_URL }}/auth/realms/29ecfa4f-ec23-4ebe-8d8c-6d556d1daba4/protocol/openid-connect/token"
+              Write-Host "🔐 Token endpoint: $tokenEndpoint"
+            }
+
+            if ([string]::IsNullOrEmpty($tokenEndpoint)) {
+              throw "Failed to determine token endpoint"
+            }
 
             # Request access token
             $body = @{
