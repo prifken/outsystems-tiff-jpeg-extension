@@ -140,163 +140,420 @@ jobs:
             exit 1
           }
 
-      # Step 3: Obtain OAuth 2.0 access token from ODC using OIDC Discovery
-      - name: Get ODC access token
+      # ========================================================================
+      # STEP 1: AUTHENTICATION - Get OAuth 2.0 Access Token
+      # ========================================================================
+      - name: "Step 1: Authenticate with ODC"
         id: auth
         shell: pwsh
         run: |
-          Write-Host "🔐 Authenticating with ODC..."
+          $stepStart = Get-Date
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "STEP 1: AUTHENTICATION"
+          Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-            # Step 1: Get OIDC Discovery document to find the token endpoint
+            # Get OIDC Discovery document
             $discoveryUrl = "${{ secrets.ODC_PORTAL_URL }}/.well-known/openid-configuration"
-            Write-Host "Fetching OIDC Discovery from: $discoveryUrl"
+            Write-Host "🔍 Fetching OIDC Discovery: $discoveryUrl"
 
             $discovery = Invoke-RestMethod -Uri $discoveryUrl -Method Get
-
-            # Step 2: Extract token endpoint from discovery document
             $tokenEndpoint = $discovery.token_endpoint
 
             if ([string]::IsNullOrEmpty($tokenEndpoint)) {
-              Write-Error "❌ Failed to get token endpoint from OIDC Discovery"
-              exit 1
+              throw "Failed to get token endpoint from OIDC Discovery"
             }
 
-            Write-Host "✅ OIDC Discovery successful"
-            Write-Host "Token endpoint: $tokenEndpoint"
+            Write-Host "✅ Token endpoint: $tokenEndpoint"
 
-            # Step 3: Request access token using client credentials
+            # Request access token
             $body = @{
               grant_type    = "client_credentials"
               client_id     = "${{ secrets.ODC_CLIENT_ID }}"
               client_secret = "${{ secrets.ODC_CLIENT_SECRET }}"
             }
 
-            Write-Host "Requesting access token..."
+            Write-Host "🔐 Requesting access token..."
             $response = Invoke-RestMethod -Uri $tokenEndpoint -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
 
-            # Extract access token
             $accessToken = $response.access_token
-
             if ([string]::IsNullOrEmpty($accessToken)) {
-              Write-Error "❌ Failed to obtain access token - empty response"
-              exit 1
+              throw "Empty access token received"
             }
 
-            Write-Host "✅ Access token obtained successfully"
-            Write-Host "Token type: $($response.token_type)"
-            Write-Host "Expires in: $($response.expires_in) seconds"
-
-            # Save token to output (masked in logs)
+            # Save and mask token
             "ACCESS_TOKEN=$accessToken" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-            # Mask the token in logs
             Write-Host "::add-mask::$accessToken"
 
+            $stepDuration = (Get-Date) - $stepStart
+            Write-Host "✅ Authentication successful (Token expires in: $($response.expires_in)s)"
+            Write-Host "⏱️  Step 1 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+            Write-Host ""
+
           } catch {
-            Write-Error "❌ Authentication failed: $($_.Exception.Message)"
-
-            # Try to get detailed error response
+            Write-Error "❌ Step 1 failed: $($_.Exception.Message)"
             if ($_.Exception.Response) {
-              try {
-                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                $errorResponse = $reader.ReadToEnd()
-                Write-Host "Error details: $errorResponse"
-              } catch {
-                Write-Host "Could not read error response"
-              }
+              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+              Write-Host "Error details: $($reader.ReadToEnd())"
             }
-
             exit 1
           }
 
-      # Step 4: Upload library to ODC
-      - name: Upload library to ODC
+      # ========================================================================
+      # STEP 2: Get Pre-signed Upload URL
+      # ========================================================================
+      - name: "Step 2: Get Upload URL"
+        id: upload_url
         shell: pwsh
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
         run: |
-          Write-Host "🚀 Deploying to OutSystems ODC..."
+          $stepStart = Get-Date
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "STEP 2: GET PRE-SIGNED UPLOAD URL"
+          Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-            # Prepare upload request
-            $uploadUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-logic/v1/libraries"
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/uploads"
+            Write-Host "📡 POST $apiUrl"
 
-            # Read ZIP file as bytes
-            $zipPath = Resolve-Path ${{ env.ZIP_FILE }}
-            $zipBytes = [System.IO.File]::ReadAllBytes($zipPath)
-            $zipFileName = [System.IO.Path]::GetFileName($zipPath)
-
-            Write-Host "📦 Uploading: $zipFileName ($($zipBytes.Length / 1MB) MB)"
-            Write-Host "📍 Target: $uploadUrl"
-
-            # Create multipart/form-data boundary
-            $boundary = [System.Guid]::NewGuid().ToString()
-
-            # Build multipart form data
-            $LF = "`r`n"
-            $bodyLines = (
-              "--$boundary",
-              "Content-Disposition: form-data; name=`"file`"; filename=`"$zipFileName`"",
-              "Content-Type: application/zip$LF",
-              [System.Text.Encoding]::GetEncoding("iso-8859-1").GetString($zipBytes),
-              "--$boundary--$LF"
-            ) -join $LF
-
-            # Prepare headers
             $headers = @{
-              Authorization  = "Bearer $env:ACCESS_TOKEN"
-              "Content-Type" = "multipart/form-data; boundary=$boundary"
+              "Authorization" = "Bearer $env:ACCESS_TOKEN"
+              "Content-Type" = "application/json"
             }
 
-            # Upload library
-            Write-Host "Uploading library..."
-            $response = Invoke-RestMethod `
-              -Uri $uploadUrl `
-              -Method Post `
-              -Headers $headers `
-              -Body $bodyLines
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
 
-            # Check response
-            Write-Host "✅ Library uploaded successfully!"
+            $uploadUrl = $response.uploadUrl
+            $downloadUrl = $response.downloadUrl
+
+            if ([string]::IsNullOrEmpty($uploadUrl) -or [string]::IsNullOrEmpty($downloadUrl)) {
+              throw "Missing uploadUrl or downloadUrl in response"
+            }
+
+            # Save URLs to outputs
+            "UPLOAD_URL=$uploadUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "DOWNLOAD_URL=$downloadUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+            # Mask S3 URLs in logs
+            Write-Host "::add-mask::$uploadUrl"
+            Write-Host "::add-mask::$downloadUrl"
+
+            $stepDuration = (Get-Date) - $stepStart
+            Write-Host "✅ Pre-signed URLs obtained"
+            Write-Host "⏱️  Step 2 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
             Write-Host ""
-            Write-Host "Response:"
-            Write-Host ($response | ConvertTo-Json -Depth 5)
-
-            # Save deployment info for summary
-            if ($response.LibraryKey) {
-              "LIBRARY_KEY=$($response.LibraryKey)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            }
 
           } catch {
-            Write-Error "❌ Deployment failed: $($_.Exception.Message)"
-
-            # Try to get detailed error response
+            Write-Error "❌ Step 2 failed: $($_.Exception.Message)"
             if ($_.Exception.Response) {
-              $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-              $errorResponse = $reader.ReadToEnd()
-              Write-Host "Error details: $errorResponse"
+              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+              Write-Host "Error details: $($reader.ReadToEnd())"
             }
-
             exit 1
           }
 
-      # Step 5: Add deployment summary
-      - name: Deployment summary
+      # ========================================================================
+      # STEP 3: Upload ZIP to S3
+      # ========================================================================
+      - name: "Step 3: Upload ZIP to S3"
+        shell: pwsh
+        env:
+          UPLOAD_URL: ${{ steps.upload_url.outputs.UPLOAD_URL }}
+        run: |
+          $stepStart = Get-Date
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "STEP 3: UPLOAD ZIP TO S3"
+          Write-Host "════════════════════════════════════════════════════════════════"
+
+          try {
+            $zipPath = Resolve-Path ${{ env.ZIP_FILE }}
+            $zipBytes = [System.IO.File]::ReadAllBytes($zipPath)
+            $zipSizeMB = $zipBytes.Length / 1MB
+
+            Write-Host "📦 File: ${{ env.ZIP_FILE }}"
+            Write-Host "📏 Size: $($zipSizeMB.ToString('F2')) MB"
+            Write-Host "🚀 Uploading to S3..."
+
+            $headers = @{
+              "Content-Type" = "application/zip"
+            }
+
+            Invoke-RestMethod -Uri $env:UPLOAD_URL -Method Put -Headers $headers -Body $zipBytes | Out-Null
+
+            $stepDuration = (Get-Date) - $stepStart
+            Write-Host "✅ ZIP uploaded successfully"
+            Write-Host "⏱️  Step 3 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+            Write-Host ""
+
+          } catch {
+            Write-Error "❌ Step 3 failed: $($_.Exception.Message)"
+            exit 1
+          }
+
+      # ========================================================================
+      # STEP 4: Create Generation Operation
+      # ========================================================================
+      - name: "Step 4: Create Generation Operation"
+        id: generation
+        shell: pwsh
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
+          DOWNLOAD_URL: ${{ steps.upload_url.outputs.DOWNLOAD_URL }}
+        run: |
+          $stepStart = Get-Date
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "STEP 4: CREATE GENERATION OPERATION"
+          Write-Host "════════════════════════════════════════════════════════════════"
+
+          try {
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/generation-operations"
+            Write-Host "📡 POST $apiUrl"
+
+            $headers = @{
+              "Authorization" = "Bearer $env:ACCESS_TOKEN"
+              "Content-Type" = "application/json"
+            }
+
+            $body = @{
+              fileName = "${{ env.ZIP_FILE }}"
+              highCodeBinaryUri = $env:DOWNLOAD_URL
+            } | ConvertTo-Json
+
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
+
+            $operationKey = $response.key
+
+            if ([string]::IsNullOrEmpty($operationKey)) {
+              throw "Missing operation key in response"
+            }
+
+            "OPERATION_KEY=$operationKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+            $stepDuration = (Get-Date) - $stepStart
+            Write-Host "✅ Generation operation created"
+            Write-Host "🔑 Operation Key: $operationKey"
+            Write-Host "⏱️  Step 4 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+            Write-Host ""
+
+          } catch {
+            Write-Error "❌ Step 4 failed: $($_.Exception.Message)"
+            if ($_.Exception.Response) {
+              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+              Write-Host "Error details: $($reader.ReadToEnd())"
+            }
+            exit 1
+          }
+
+      # ========================================================================
+      # STEP 5: Poll for Generation Completion
+      # ========================================================================
+      - name: "Step 5: Wait for Generation"
+        id: poll
+        shell: pwsh
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
+          OPERATION_KEY: ${{ steps.generation.outputs.OPERATION_KEY }}
+        run: |
+          $stepStart = Get-Date
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "STEP 5: POLL FOR GENERATION COMPLETION"
+          Write-Host "════════════════════════════════════════════════════════════════"
+
+          try {
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/generation-operations/$env:OPERATION_KEY"
+            $headers = @{
+              "Authorization" = "Bearer $env:ACCESS_TOKEN"
+            }
+
+            $maxAttempts = 36  # 36 * 5s = 3 minutes
+            $attempt = 0
+            $status = ""
+
+            Write-Host "⏳ Polling for completion (max 3 minutes)..."
+
+            while ($attempt -lt $maxAttempts) {
+              $attempt++
+              Write-Host "[$attempt/$maxAttempts] Checking status..."
+
+              $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers $headers
+              $status = $response.status
+
+              Write-Host "Status: $status"
+
+              if ($status -eq "ReadyForReview") {
+                $libraryKey = $response.libraryKey
+                $libraryName = $response.libraryName
+
+                if ([string]::IsNullOrEmpty($libraryKey)) {
+                  throw "Missing libraryKey in response"
+                }
+
+                "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                "LIBRARY_NAME=$libraryName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+                $stepDuration = (Get-Date) - $stepStart
+                Write-Host ""
+                Write-Host "✅ Generation completed successfully!"
+                Write-Host "🔑 Library Key: $libraryKey"
+                Write-Host "📚 Library Name: $libraryName"
+                Write-Host "⏱️  Step 5 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+                Write-Host ""
+                exit 0
+              }
+
+              if ($status -eq "Failed" -or $status -eq "Error") {
+                throw "Generation failed with status: $status"
+              }
+
+              Start-Sleep -Seconds 5
+            }
+
+            throw "Timeout waiting for generation (status: $status)"
+
+          } catch {
+            Write-Error "❌ Step 5 failed: $($_.Exception.Message)"
+            if ($_.Exception.Response) {
+              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+              Write-Host "Error details: $($reader.ReadToEnd())"
+            }
+            exit 1
+          }
+
+      # ========================================================================
+      # STEP 6: Create Release
+      # ========================================================================
+      - name: "Step 6: Create Release"
+        id: release
+        shell: pwsh
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
+          LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
+        run: |
+          $stepStart = Get-Date
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "STEP 6: CREATE RELEASE"
+          Write-Host "════════════════════════════════════════════════════════════════"
+
+          try {
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-management/v1/assets/$env:LIBRARY_KEY/releases"
+            Write-Host "📡 POST $apiUrl"
+
+            $headers = @{
+              "Authorization" = "Bearer $env:ACCESS_TOKEN"
+              "Content-Type" = "application/json"
+            }
+
+            $body = @{
+              versionNumber = "0.1.${{ github.run_number }}"
+              releaseNotes = "Automated deployment from GitHub Actions (Run #${{ github.run_number }})"
+            } | ConvertTo-Json
+
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
+
+            $releaseKey = $response.releaseKey
+
+            if ([string]::IsNullOrEmpty($releaseKey)) {
+              throw "Missing releaseKey in response"
+            }
+
+            "RELEASE_KEY=$releaseKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+            $stepDuration = (Get-Date) - $stepStart
+            Write-Host "✅ Release created successfully"
+            Write-Host "🔑 Release Key: $releaseKey"
+            Write-Host "📌 Version: 0.1.${{ github.run_number }}"
+            Write-Host "⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+            Write-Host ""
+
+          } catch {
+            Write-Error "❌ Step 6 failed: $($_.Exception.Message)"
+            if ($_.Exception.Response) {
+              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+              Write-Host "Error details: $($reader.ReadToEnd())"
+            }
+            exit 1
+          }
+
+      # ========================================================================
+      # STEP 7: Publish to Development
+      # ========================================================================
+      - name: "Step 7: Deploy to Development"
+        id: deploy
+        shell: pwsh
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
+          LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
+          RELEASE_KEY: ${{ steps.release.outputs.RELEASE_KEY }}
+        run: |
+          $stepStart = Get-Date
+          Write-Host "════════════════════════════════════════════════════════════════"
+          Write-Host "STEP 7: DEPLOY TO DEVELOPMENT"
+          Write-Host "════════════════════════════════════════════════════════════════"
+
+          try {
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-management/v1/assets/$env:LIBRARY_KEY/releases/$env:RELEASE_KEY/deployments"
+            Write-Host "📡 POST $apiUrl"
+
+            $headers = @{
+              "Authorization" = "Bearer $env:ACCESS_TOKEN"
+              "Content-Type" = "application/json"
+            }
+
+            $body = @{
+              targetStage = "Development"
+            } | ConvertTo-Json
+
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
+
+            $stepDuration = (Get-Date) - $stepStart
+            Write-Host "✅ Deployed to Development successfully"
+            Write-Host "⏱️  Step 7 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+            Write-Host ""
+            Write-Host "════════════════════════════════════════════════════════════════"
+            Write-Host "🎉 DEPLOYMENT COMPLETE!"
+            Write-Host "════════════════════════════════════════════════════════════════"
+
+          } catch {
+            Write-Error "❌ Step 7 failed: $($_.Exception.Message)"
+            if ($_.Exception.Response) {
+              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+              Write-Host "Error details: $($reader.ReadToEnd())"
+            }
+            exit 1
+          }
+
+      # ========================================================================
+      # SUCCESS SUMMARY
+      # ========================================================================
+      - name: Deployment Summary
         if: success()
         shell: pwsh
+        env:
+          LIBRARY_NAME: ${{ steps.poll.outputs.LIBRARY_NAME }}
+          LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
+          RELEASE_KEY: ${{ steps.release.outputs.RELEASE_KEY }}
         run: |
-          Write-Output "## 🚀 Deployment Successful" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "## 🎉 Deployment Successful" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "**Library:** ${{ env.ARTIFACT_NAME }}" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "**Environment:** Development" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "**Portal:** ${{ secrets.ODC_PORTAL_URL }}" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "**Deployed:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "### Library Information" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Name:** $env:LIBRARY_NAME" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Library Key:** ``$env:LIBRARY_KEY``" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Release Key:** ``$env:RELEASE_KEY``" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Version:** 0.1.${{ github.run_number }}" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "✅ External Logic library deployed to ODC Development environment" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "### Deployment Details" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Environment:** Development" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Portal:** ${{ secrets.ODC_PORTAL_URL }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Deployed:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Run:** #${{ github.run_number }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "✅ All 7 deployment steps completed successfully!" >> $env:GITHUB_STEP_SUMMARY
 
-      # Step 6: Handle deployment failure
-      - name: Deployment failure summary
+      # ========================================================================
+      # FAILURE SUMMARY
+      # ========================================================================
+      - name: Deployment Failure Summary
         if: failure()
         shell: pwsh
         run: |
@@ -305,8 +562,11 @@ jobs:
           Write-Output "The deployment to ODC Development environment failed." >> $env:GITHUB_STEP_SUMMARY
           Write-Output "Please check the logs above for detailed error information." >> $env:GITHUB_STEP_SUMMARY
           Write-Output "" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "**Common issues:**" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- Invalid credentials (check ODC_CLIENT_ID and ODC_CLIENT_SECRET)" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- Incorrect portal URL (check ODC_PORTAL_URL)" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- Network connectivity issues" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- Invalid library package format" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "### Common Issues" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 1:** Invalid credentials or OIDC Discovery failure" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 2:** API permissions or endpoint not available" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 3:** S3 upload failure or network issues" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 4:** Invalid ZIP package or generation request" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 5:** Generation timeout or compilation errors" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 6:** Release creation failure" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Step 7:** Deployment to stage failure" >> $env:GITHUB_STEP_SUMMARY
