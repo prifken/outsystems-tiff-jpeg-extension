@@ -45,36 +45,45 @@ jobs:
       - name: Display .NET version
         run: dotnet --version
 
-      # Step 4: Inject Build Metadata
+      # Step 4: Inject Build Metadata and Code
       - name: Inject Build Metadata
         shell: pwsh
         run: |
           $buildId = "${{ github.run_number }}-${{ github.sha }}"
           $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC")
+          $runNumber = "${{ github.run_number }}"
 
           Write-Host "Injecting build metadata:"
           Write-Host "  Build ID: $buildId"
           Write-Host "  Timestamp: $timestamp"
+          Write-Host "  Run Number: $runNumber"
 
-          # Update AssemblyInfo or add build constant
-          $assemblyInfoPath = "Properties/AssemblyInfo.cs"
+          # Create BuildInfo class with unique content
+          $buildInfoPath = "BuildInfo.cs"
+          @"
+          using System;
 
-          if (Test-Path $assemblyInfoPath) {
-            # Add to existing AssemblyInfo
-            Add-Content $assemblyInfoPath "`n[assembly: AssemblyMetadata(`"BuildId`", `"$buildId`")]"
-            Add-Content $assemblyInfoPath "[assembly: AssemblyMetadata(`"BuildTimestamp`", `"$timestamp`")]"
-          } else {
-            # Create AssemblyInfo.cs
-            New-Item -ItemType Directory -Force -Path "Properties" | Out-Null
-            @"
-          using System.Reflection;
+          namespace ImageConverterLibrary
+          {
+              /// <summary>
+              /// Auto-generated build information - DO NOT EDIT
+              /// This class is regenerated on every build to force unique binary
+              /// </summary>
+              public static class BuildInfo
+              {
+                  public const string BuildId = "$buildId";
+                  public const string BuildTimestamp = "$timestamp";
+                  public const int BuildNumber = $runNumber;
+                  public const string CommitSha = "${{ github.sha }}";
 
-          [assembly: AssemblyMetadata("BuildId", "$buildId")]
-          [assembly: AssemblyMetadata("BuildTimestamp", "$timestamp")]
-          "@ | Out-File -FilePath $assemblyInfoPath -Encoding UTF8
+                  // Unique hash that changes every build
+                  public const string BuildHash = "$buildId-$timestamp";
+              }
           }
+          "@ | Out-File -FilePath $buildInfoPath -Encoding UTF8
 
-          Write-Host "✅ Build metadata injected"
+          Write-Host "✅ BuildInfo.cs created with unique content"
+          Write-Host "   This ensures ODC sees each build as different"
 
       # Step 5: Restore NuGet dependencies
       - name: Restore dependencies
