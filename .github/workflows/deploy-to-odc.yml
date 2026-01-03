@@ -18,7 +18,7 @@ env:
   DOTNET_VERSION: '8.0.x'
   PROJECT_FILE: 'ImageConverterLibrary.csproj'
   ARTIFACT_NAME: 'ImageConverterLibrary'
-  ZIP_FILE: 'ImageConverterLibrary.zip'
+  ZIP_FILE_BASE: 'ImageConverterLibrary'
 
 jobs:
   # ============================================================================
@@ -45,46 +45,34 @@ jobs:
       - name: Display .NET version
         run: dotnet --version
 
-      # Step 4: Inject Build Metadata and Code
+      # Step 4: Inject Build Metadata into Source Code
       - name: Inject Build Metadata
         shell: pwsh
         run: |
           $buildId = "${{ github.run_number }}-${{ github.sha }}"
           $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC")
           $runNumber = "${{ github.run_number }}"
+          $commitShort = "${{ github.sha }}".Substring(0, 7)
 
-          Write-Host "Injecting build metadata:"
+          Write-Host "Injecting build metadata into source code:"
           Write-Host "  Build ID: $buildId"
           Write-Host "  Timestamp: $timestamp"
           Write-Host "  Run Number: $runNumber"
+          Write-Host "  Commit: $commitShort"
           Write-Host ""
 
-          # Create BuildInfo class with unique content
-          $buildInfoPath = "BuildInfo.cs"
-          @"
-          using System;
+          # Create unique build metadata string
+          $buildMetadata = "Run #$runNumber | $timestamp | Commit $commitShort"
 
-          namespace ImageConverterLibrary
-          {
-              /// <summary>
-              /// Auto-generated build information - DO NOT EDIT
-              /// This class is regenerated on every build to force unique binary
-              /// </summary>
-              public static class BuildInfo
-              {
-                  public const string BuildId = "$buildId";
-                  public const string BuildTimestamp = "$timestamp";
-                  public const int BuildNumber = $runNumber;
-                  public const string CommitSha = "${{ github.sha }}";
+          # Replace placeholder in ImageConverter.cs
+          Write-Host "Updating ImageConverter.cs with build metadata..."
+          $converterPath = "ImageConverter.cs"
+          $content = Get-Content $converterPath -Raw
+          $content = $content -replace 'BUILD_METADATA_PLACEHOLDER', $buildMetadata
+          $content | Out-File -FilePath $converterPath -Encoding UTF8 -NoNewline
 
-                  // Unique hash that changes every build
-                  public const string BuildHash = "$buildId-$timestamp";
-              }
-          }
-          "@ | Out-File -FilePath $buildInfoPath -Encoding UTF8
-
-          Write-Host "✅ BuildInfo.cs created with unique content"
-          Write-Host "   .NET SDK will automatically compile it (no .csproj change needed)"
+          Write-Host "✅ Build metadata injected into GetBuildVersion() method"
+          Write-Host "   This modifies the actual runtime code, forcing a new modelDigest"
           Write-Host ""
 
       # Step 5: Restore NuGet dependencies
@@ -128,18 +116,22 @@ jobs:
 
       # Step 8: Create ZIP archive for ODC deployment
       - name: Create deployment package
+        id: create_zip
         shell: pwsh
         run: |
-          Write-Host "Creating ZIP archive from publish folder..."
+          # Create unique ZIP filename with run number
+          $zipFile = "${{ env.ZIP_FILE_BASE }}-${{ github.run_number }}.zip"
+          Write-Host "Creating unique ZIP archive: $zipFile"
+          Write-Host ""
 
           # Remove existing ZIP if present
-          if (Test-Path ${{ env.ZIP_FILE }}) {
-            Remove-Item ${{ env.ZIP_FILE }} -Force
+          if (Test-Path $zipFile) {
+            Remove-Item $zipFile -Force
             Write-Host "Removed existing ZIP file"
           }
 
           # List files in publish folder before zipping
-          Write-Host "`n📋 Files in publish folder:"
+          Write-Host "📋 Files in publish folder:"
           Get-ChildItem -Path ./publish -Recurse -File | ForEach-Object {
             Write-Host "  $($_.FullName.Replace((Get-Location).Path, '.'))"
           }
@@ -153,19 +145,23 @@ jobs:
             }
           } else {
             Write-Host "`n⚠️  WARNING: No BuildInfo files found in publish folder!"
-            Write-Host "This means unique build metadata is NOT being included."
+            Write-Host "Testing if unique filename forces new revision..."
           }
 
           Write-Host ""
 
-          # Create new ZIP archive
-          Compress-Archive -Path ./publish/* -DestinationPath ${{ env.ZIP_FILE }} -Force
+          # Create new ZIP archive with unique name
+          Compress-Archive -Path ./publish/* -DestinationPath $zipFile -Force
 
           # Verify ZIP was created and show size
-          if (Test-Path ${{ env.ZIP_FILE }}) {
-            $zipSize = (Get-Item ${{ env.ZIP_FILE }}).Length / 1MB
-            Write-Host "✅ ZIP created successfully: ${{ env.ZIP_FILE }}"
+          if (Test-Path $zipFile) {
+            $zipSize = (Get-Item $zipFile).Length / 1MB
+            Write-Host "✅ ZIP created successfully: $zipFile"
             Write-Host "📦 Package size: $($zipSize.ToString('F2')) MB"
+            Write-Host "🧪 Testing if unique filename affects ODC revision detection..."
+
+            # Output the ZIP filename for next job
+            "ZIP_FILE=$zipFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
             Write-Error "❌ Failed to create ZIP file"
             exit 1
@@ -175,8 +171,8 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.ZIP_FILE }}
+          name: ${{ env.ARTIFACT_NAME }}-${{ github.run_number }}
+          path: ${{ steps.create_zip.outputs.ZIP_FILE }}
           retention-days: 30
           if-no-files-found: error
 
@@ -207,20 +203,28 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.ARTIFACT_NAME }}-${{ github.run_number }}
 
       # Step 2: Verify artifact was downloaded
       - name: Verify artifact
+        id: verify_zip
         shell: pwsh
         run: |
           Write-Host "Verifying downloaded artifact..."
 
-          if (Test-Path ${{ env.ZIP_FILE }}) {
-            $zipSize = (Get-Item ${{ env.ZIP_FILE }}).Length / 1MB
-            Write-Host "✅ Artifact found: ${{ env.ZIP_FILE }}"
+          # Unique ZIP filename
+          $zipFile = "${{ env.ZIP_FILE_BASE }}-${{ github.run_number }}.zip"
+
+          if (Test-Path $zipFile) {
+            $zipSize = (Get-Item $zipFile).Length / 1MB
+            Write-Host "✅ Artifact found: $zipFile"
             Write-Host "📦 Size: $($zipSize.ToString('F2')) MB"
+            Write-Host "🧪 Filename includes run number - testing if this affects ODC..."
+
+            # Output for use in later steps
+            "ZIP_FILE=$zipFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
-            Write-Error "❌ Artifact not found: ${{ env.ZIP_FILE }}"
+            Write-Error "❌ Artifact not found: $zipFile"
             exit 1
           }
 
@@ -608,6 +612,7 @@ jobs:
         shell: pwsh
         env:
           UPLOAD_URL: ${{ steps.upload_url.outputs.UPLOAD_URL }}
+          ZIP_FILE: ${{ steps.verify_zip.outputs.ZIP_FILE }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
@@ -616,11 +621,11 @@ jobs:
 
           Write-Host "`n📥 INPUTS:"
           Write-Host "  UPLOAD_URL: $(if($env:UPLOAD_URL) {'***SET***'} else {'NOT SET'})"
-          Write-Host "  ZIP_FILE: ${{ env.ZIP_FILE }}"
+          Write-Host "  ZIP_FILE: $env:ZIP_FILE"
           Write-Host ""
 
           try {
-            $zipPath = Resolve-Path ${{ env.ZIP_FILE }}
+            $zipPath = Resolve-Path $env:ZIP_FILE
             $zipBytes = [System.IO.File]::ReadAllBytes($zipPath)
             $zipSizeMB = $zipBytes.Length / 1MB
 
@@ -629,6 +634,7 @@ jobs:
             Write-Host "  URL: ***uploadUrl***"
             Write-Host "  Content-Type: application/zip"
             Write-Host "  Body Size: $($zipSizeMB.ToString('F2')) MB"
+            Write-Host "  Filename: $env:ZIP_FILE"
             Write-Host ""
             Write-Host "🚀 Uploading to S3..."
 
@@ -657,6 +663,7 @@ jobs:
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
           DOWNLOAD_URL: ${{ steps.upload_url.outputs.DOWNLOAD_URL }}
+          ZIP_FILE: ${{ steps.verify_zip.outputs.ZIP_FILE }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
@@ -666,7 +673,7 @@ jobs:
           Write-Host "`n📥 INPUTS:"
           Write-Host "  ACCESS_TOKEN: $(if($env:ACCESS_TOKEN) {'***SET***'} else {'NOT SET'})"
           Write-Host "  DOWNLOAD_URL: $(if($env:DOWNLOAD_URL) {'***SET***'} else {'NOT SET'})"
-          Write-Host "  ZIP_FILE: ${{ env.ZIP_FILE }}"
+          Write-Host "  ZIP_FILE: $env:ZIP_FILE (🧪 includes run number)"
           Write-Host ""
 
           try {
@@ -680,7 +687,7 @@ jobs:
 
             # Per official docs: body needs fileName and highCodeBinaryUri
             $body = @{
-              fileName = "${{ env.ZIP_FILE }}"
+              fileName = $env:ZIP_FILE
               highCodeBinaryUri = $env:DOWNLOAD_URL
             } | ConvertTo-Json
 
@@ -691,6 +698,8 @@ jobs:
             Write-Host "  Headers: Content-Type: application/json"
             Write-Host "  Body:"
             Write-Host $body
+            Write-Host ""
+            Write-Host "🧪 EXPERIMENT: Testing if unique filename forces new revision..."
             Write-Host ""
 
             Write-Host "🔄 Starting library generation operation..."
