@@ -836,8 +836,87 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
+    /// Generates a pre-signed S3 URL for downloading files
+    /// Use this to download large files (>5.5MB) directly from S3 to the browser
+    /// </summary>
+    public S3UploadUrlResult GenerateS3DownloadUrl(
+        string bucketName,
+        string s3Key,
+        string awsAccessKey,
+        string awsSecretKey,
+        string awsRegion = "us-east-1",
+        int expirationMinutes = 15)
+    {
+        try
+        {
+            // Validate inputs
+            if (string.IsNullOrWhiteSpace(bucketName))
+                return new S3UploadUrlResult { Success = false, Message = "Bucket name cannot be empty" };
+
+            if (string.IsNullOrWhiteSpace(s3Key))
+                return new S3UploadUrlResult { Success = false, Message = "S3 key cannot be empty" };
+
+            if (string.IsNullOrWhiteSpace(awsAccessKey) || string.IsNullOrWhiteSpace(awsSecretKey))
+                return new S3UploadUrlResult { Success = false, Message = "AWS credentials cannot be empty" };
+
+            if (expirationMinutes < 1 || expirationMinutes > 10080) // Max 7 days
+                return new S3UploadUrlResult { Success = false, Message = "Expiration must be between 1 and 10080 minutes (7 days)" };
+
+            // Create AWS credentials and S3 client
+            var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
+            var regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
+
+            using var s3Client = new AmazonS3Client(credentials, regionEndpoint);
+
+            // Generate pre-signed download URL
+            var expiresAt = DateTime.UtcNow.AddMinutes(expirationMinutes);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName = bucketName,
+                Key = s3Key,
+                Verb = HttpVerb.GET,  // GET for downloads
+                Expires = expiresAt
+            };
+
+            string downloadUrl = s3Client.GetPreSignedURL(request);
+
+            return new S3UploadUrlResult
+            {
+                Success = true,
+                Message = $"Pre-signed download URL generated successfully. Expires in {expirationMinutes} minutes.",
+                UploadUrl = downloadUrl,  // Reusing this field for download URL
+                S3Key = s3Key,
+                ExpiresAt = expiresAt.ToString("yyyy-MM-dd HH:mm:ss UTC")
+            };
+        }
+        catch (AmazonS3Exception s3Ex)
+        {
+            return new S3UploadUrlResult
+            {
+                Success = false,
+                Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
+                UploadUrl = string.Empty,
+                S3Key = s3Key,
+                ExpiresAt = string.Empty
+            };
+        }
+        catch (Exception ex)
+        {
+            return new S3UploadUrlResult
+            {
+                Success = false,
+                Message = $"Error generating download URL: {ex.Message}",
+                UploadUrl = string.Empty,
+                S3Key = s3Key,
+                ExpiresAt = string.Empty
+            };
+        }
+    }
+
+    /// <summary>
     /// Downloads a file from S3 and returns it as binary data
-    /// Use this to download converted JPEG files for display or download in OutSystems
+    /// LIMITATION: Only works for files <5.5MB due to OutSystems payload limits
+    /// Use GenerateS3DownloadUrl for larger files instead
     /// </summary>
     public S3DownloadResult DownloadFileFromS3(
         string bucketName,

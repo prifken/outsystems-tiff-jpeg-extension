@@ -199,7 +199,8 @@ public interface IImageConverter
 
     /// <summary>
     /// Downloads a file from S3 and returns it as binary data
-    /// Use this to download converted JPEG files for display or download in OutSystems
+    /// LIMITATION: Only works for files smaller than 5.5 MB due to OutSystems payload limits.
+    /// For larger files, use GenerateS3DownloadUrl instead.
     /// </summary>
     /// <param name="bucketName">S3 bucket name</param>
     /// <param name="s3Key">S3 key of file to download (e.g., 'converted/document.jpg')</param>
@@ -208,7 +209,7 @@ public interface IImageConverter
     /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
     /// <returns>Download result with binary file data</returns>
     [OSAction(
-        Description = "Download a file from S3 as binary data (for display or download in OutSystems)",
+        Description = "Download a file from S3 as binary data (ONLY for files <5.5MB - use GenerateS3DownloadUrl for larger files)",
         ReturnName = "result",
         ReturnDescription = "Download result with binary file data, filename, and metadata",
         ReturnType = OSDataType.InferredFromDotNetType)]
@@ -237,6 +238,53 @@ public interface IImageConverter
             Description = "AWS Region (default: us-east-1)",
             DataType = OSDataType.Text)]
         string awsRegion = "us-east-1");
+
+    /// <summary>
+    /// Generates a pre-signed S3 URL for downloading files (bypasses 5.5MB limit)
+    /// Use this URL to download large files directly from S3 to the browser
+    /// </summary>
+    /// <param name="bucketName">S3 bucket name</param>
+    /// <param name="s3Key">S3 key of file to download (e.g., 'converted/document.jpg')</param>
+    /// <param name="awsAccessKey">AWS Access Key ID</param>
+    /// <param name="awsSecretKey">AWS Secret Access Key</param>
+    /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
+    /// <param name="expirationMinutes">URL expiration time in minutes (default: 15)</param>
+    /// <returns>Pre-signed download URL result</returns>
+    [OSAction(
+        Description = "Generate pre-signed S3 download URL for large files (bypasses 5.5MB limit)",
+        ReturnName = "result",
+        ReturnDescription = "Pre-signed URL result with download URL and expiration",
+        ReturnType = OSDataType.InferredFromDotNetType)]
+    S3UploadUrlResult GenerateS3DownloadUrl(
+        [OSParameter(
+            Description = "S3 bucket name",
+            DataType = OSDataType.Text)]
+        string bucketName,
+
+        [OSParameter(
+            Description = "S3 key of file to download (e.g., 'converted/document.jpg')",
+            DataType = OSDataType.Text)]
+        string s3Key,
+
+        [OSParameter(
+            Description = "AWS Access Key ID",
+            DataType = OSDataType.Text)]
+        string awsAccessKey,
+
+        [OSParameter(
+            Description = "AWS Secret Access Key",
+            DataType = OSDataType.Text)]
+        string awsSecretKey,
+
+        [OSParameter(
+            Description = "AWS Region (default: us-east-1)",
+            DataType = OSDataType.Text)]
+        string awsRegion = "us-east-1",
+
+        [OSParameter(
+            Description = "URL expiration in minutes (default: 15)",
+            DataType = OSDataType.Integer)]
+        int expirationMinutes = 15);
 
     /// <summary>
     /// Gets the current server timestamp for testing
