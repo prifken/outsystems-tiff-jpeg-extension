@@ -25,6 +25,9 @@
 
     <!-- Image processing library for TIFF to JPEG conversion -->
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.7" />
+
+    <!-- Fallback for complex TIFFs that ImageSharp can't handle -->
+    <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.2.0" />
   </ItemGroup>
 
 </Project>

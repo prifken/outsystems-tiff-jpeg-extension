@@ -5,6 +5,7 @@ using System.Text;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Processing;
+using ImageMagick;
 
 namespace ImageConverterLibrary;
 
@@ -547,43 +548,84 @@ public class ImageConverter : IImageConverter
 
             // Load TIFF from S3 stream
             log.AppendLine("[STEP 4] Loading TIFF image from S3 stream...");
-            using var tiffStream = getResponse.ResponseStream;
-            using var image = Image.Load(tiffStream);
 
-            log.AppendLine($"Image loaded successfully");
-            log.AppendLine($"Image format: {image.Metadata.DecodedImageFormat?.Name ?? "Unknown"}");
-            log.AppendLine($"Dimensions: {image.Width} x {image.Height} pixels");
-            log.AppendLine($"Frame count: {image.Frames.Count}");
+            // Buffer the stream so we can handle errors and retry if needed
+            log.AppendLine("Buffering S3 stream to memory...");
+            using var memoryStream = new MemoryStream();
+            getResponse.ResponseStream.CopyTo(memoryStream);
+            memoryStream.Position = 0;
+            log.AppendLine($"Stream buffered: {memoryStream.Length:N0} bytes");
 
-            int frameCount = image.Frames.Count;
-            if (frameCount > 1)
+            // Try loading with ImageSharp first (faster for simple TIFFs)
+            MemoryStream jpegStream;
+
+            try
             {
-                log.AppendLine($"NOTE: Multi-page TIFF detected. Only converting first page.");
+                log.AppendLine("Attempting to load TIFF with ImageSharp...");
+                using var image = Image.Load(memoryStream);
+                log.AppendLine("TIFF loaded successfully with ImageSharp");
+                log.AppendLine($"Image format: {image.Metadata.DecodedImageFormat?.Name ?? "Unknown"}");
+                log.AppendLine($"Dimensions: {image.Width} x {image.Height} pixels");
+                log.AppendLine($"Frame count: {image.Frames.Count}");
+
+                int frameCount = image.Frames.Count;
+                if (frameCount > 1)
+                {
+                    log.AppendLine($"NOTE: Multi-page TIFF detected ({frameCount} pages). Only converting first page.");
+                }
+                log.AppendLine();
+
+                // Convert to JPEG
+                log.AppendLine("[STEP 5] Converting to JPEG with ImageSharp...");
+                var jpegEncoder = new JpegEncoder { Quality = quality };
+                jpegStream = new MemoryStream();
+
+                // Always use the first frame to avoid issues with multi-page TIFFs
+                if (frameCount == 1)
+                {
+                    image.Save(jpegStream, jpegEncoder);
+                }
+                else
+                {
+                    // Multi-page: extract and convert only first page
+                    using var frameImage = image.Frames.CloneFrame(0);
+                    using var singleFrameImage = frameImage.CloneAs<SixLabors.ImageSharp.PixelFormats.Rgba32>();
+                    singleFrameImage.Save(jpegStream, jpegEncoder);
+                }
+
+                jpegStream.Position = 0;
+                log.AppendLine($"ImageSharp conversion complete");
+                log.AppendLine($"JPEG size: {jpegStream.Length:N0} bytes ({jpegStream.Length / 1024.0:F2} KB)");
+                log.AppendLine($"Compression ratio: {(double)getResponse.ContentLength / jpegStream.Length:F2}x");
             }
-            log.AppendLine();
-
-            // Convert to JPEG
-            log.AppendLine("[STEP 5] Converting to JPEG...");
-            var jpegEncoder = new JpegEncoder { Quality = quality };
-
-            using var jpegStream = new MemoryStream();
-
-            if (frameCount == 1)
+            catch (Exception loadEx) when (loadEx.Message.Contains("different sizes") || loadEx.Message.Contains("not supported"))
             {
-                image.Save(jpegStream, jpegEncoder);
-            }
-            else
-            {
-                // Multi-page: convert only first page
-                using var frameImage = image.Frames.CloneFrame(0);
-                using var singleFrameImage = frameImage.CloneAs<SixLabors.ImageSharp.PixelFormats.Rgba32>();
-                singleFrameImage.Save(jpegStream, jpegEncoder);
-            }
+                // ImageSharp failed - use ImageMagick fallback for complex TIFFs
+                log.AppendLine($"ImageSharp failed: {loadEx.Message}");
+                log.AppendLine("Falling back to ImageMagick for complex TIFF handling...");
 
-            jpegStream.Position = 0; // Reset for upload
-            log.AppendLine($"Conversion complete");
-            log.AppendLine($"JPEG size: {jpegStream.Length:N0} bytes ({jpegStream.Length / 1024.0:F2} KB)");
-            log.AppendLine($"Compression ratio: {(double)getResponse.ContentLength / jpegStream.Length:F2}x");
+                memoryStream.Position = 0;
+
+                // Use ImageMagick to extract and convert first page
+                using var magickImage = new MagickImage(memoryStream);
+                log.AppendLine($"ImageMagick loaded TIFF successfully");
+                log.AppendLine($"Format: {magickImage.Format}");
+                log.AppendLine($"Dimensions: {magickImage.Width}x{magickImage.Height} pixels");
+                log.AppendLine();
+
+                // Convert first page to JPEG using ImageMagick
+                log.AppendLine("[STEP 5] Converting to JPEG with ImageMagick...");
+                magickImage.Format = MagickFormat.Jpeg;
+                magickImage.Quality = (uint)quality;
+
+                var jpegBytes = magickImage.ToByteArray();
+                jpegStream = new MemoryStream(jpegBytes);
+                jpegStream.Position = 0;
+
+                log.AppendLine($"ImageMagick conversion complete");
+                log.AppendLine($"JPEG size: {jpegStream.Length:N0} bytes ({jpegStream.Length / 1024.0:F2} KB)");
+                log.AppendLine($"Compression ratio: {(double)getResponse.ContentLength / jpegStream.Length:F2}x");
+            }
             log.AppendLine();
 
             // Upload JPEG to S3
