@@ -141,7 +141,7 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 1: AUTHENTICATION - Get OAuth 2.0 Access Token
+      # STEP 1: AUTHENTICATION - DIAGNOSTIC MODE
       # ========================================================================
       - name: "Step 1: Authenticate with ODC"
         id: auth
@@ -149,59 +149,231 @@ jobs:
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 1: AUTHENTICATION"
+          Write-Host "STEP 1: AUTHENTICATION - DIAGNOSTIC MODE"
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-            # Try OIDC Discovery first to get token endpoint dynamically
-            try {
+              # === ENVIRONMENT DIAGNOSTICS ===
+              Write-Host "`n📊 ENVIRONMENT INFORMATION:"
+              Write-Host "Runner OS: $env:RUNNER_OS"
+              Write-Host "Runner Name: $env:RUNNER_NAME"
+              Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+              Write-Host "GitHub Actions: $env:GITHUB_ACTIONS"
+              Write-Host ""
+
+              # === NETWORK DIAGNOSTICS ===
+              Write-Host "🌐 NETWORK DIAGNOSTICS:"
+              $portalDomain = ([System.Uri]"${{ secrets.ODC_PORTAL_URL }}").Host
+              Write-Host "Portal Domain: $portalDomain"
+
+              # Test DNS resolution
+              try {
+                  Write-Host "`nDNS Resolution Test:"
+                  $dnsResult = Resolve-DnsName -Name $portalDomain -ErrorAction Stop
+                  Write-Host "✅ DNS Resolution successful"
+                  Write-Host "IP Addresses: $($dnsResult.IPAddress -join ', ')"
+              } catch {
+                  Write-Host "❌ DNS Resolution failed: $($_.Exception.Message)" -ForegroundColor Red
+              }
+
+              # Test basic connectivity
+              try {
+                  Write-Host "`nConnectivity Test:"
+                  $testConnection = Test-NetConnection -ComputerName $portalDomain -Port 443 -InformationLevel Detailed -ErrorAction Stop
+                  Write-Host "✅ TCP Connection successful"
+                  Write-Host "Ping Succeeded: $($testConnection.PingSucceeded)"
+                  Write-Host "TCP Test Succeeded: $($testConnection.TcpTestSucceeded)"
+                  Write-Host "Remote Address: $($testConnection.RemoteAddress)"
+              } catch {
+                  Write-Host "❌ Connectivity test failed: $($_.Exception.Message)" -ForegroundColor Yellow
+              }
+
+              # Test HTTPS connectivity
+              try {
+                  Write-Host "`nHTTPS Test (Root URL):"
+                  $rootTest = Invoke-WebRequest -Uri "${{ secrets.ODC_PORTAL_URL }}/" -Method Head -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+                  Write-Host "✅ HTTPS connection successful"
+                  Write-Host "Status Code: $($rootTest.StatusCode)"
+              } catch {
+                  Write-Host "⚠️  HTTPS root test: $($_.Exception.Message)" -ForegroundColor Yellow
+                  Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+              }
+
+              Write-Host ""
+              Write-Host "════════════════════════════════════════════════════════════════"
+
+              # === CREDENTIALS CHECK ===
+              Write-Host "`n🔐 CREDENTIALS VERIFICATION:"
+              Write-Host "Portal URL: ${{ secrets.ODC_PORTAL_URL }}"
+              Write-Host "Client ID: ${{ secrets.ODC_CLIENT_ID }}"
+              Write-Host "Client ID Length: $("${{ secrets.ODC_CLIENT_ID }}".Length) characters"
+              Write-Host "Client Secret Length: $("${{ secrets.ODC_CLIENT_SECRET }}".Length) characters"
+              Write-Host ""
+
+              # === OIDC DISCOVERY ATTEMPT ===
+              Write-Host "════════════════════════════════════════════════════════════════"
+              Write-Host "PHASE 1A: OIDC DISCOVERY"
+              Write-Host "════════════════════════════════════════════════════════════════"
+
+              $tokenEndpoint = $null
               $discoveryUrl = "${{ secrets.ODC_PORTAL_URL }}/identity/.well-known/openid-configuration"
-              Write-Host "🔍 Fetching OIDC Discovery: $discoveryUrl"
-              $discovery = Invoke-RestMethod -Uri $discoveryUrl -Method Get
-              $tokenEndpoint = $discovery.token_endpoint
-              Write-Host "✅ Token endpoint from discovery: $tokenEndpoint"
-            } catch {
-              # Fallback: Use the known token endpoint directly (in case of network/firewall restrictions)
-              Write-Host "⚠️  OIDC Discovery failed, using direct endpoint"
-              $tokenEndpoint = "${{ secrets.ODC_PORTAL_URL }}/auth/realms/29ecfa4f-ec23-4ebe-8d8c-6d556d1daba4/protocol/openid-connect/token"
-              Write-Host "🔐 Token endpoint: $tokenEndpoint"
-            }
 
-            if ([string]::IsNullOrEmpty($tokenEndpoint)) {
-              throw "Failed to determine token endpoint"
-            }
+              try {
+                  Write-Host "`n🔍 Attempting OIDC Discovery..."
+                  Write-Host "URL: $discoveryUrl"
+                  Write-Host "Method: GET"
+                  Write-Host "Expected Response: JSON with token_endpoint"
+                  Write-Host ""
 
-            # Request access token
-            $body = @{
-              grant_type    = "client_credentials"
-              client_id     = "${{ secrets.ODC_CLIENT_ID }}"
-              client_secret = "${{ secrets.ODC_CLIENT_SECRET }}"
-            }
+                  $discoveryResponse = Invoke-WebRequest -Uri $discoveryUrl -Method Get -UseBasicParsing -ErrorAction Stop
 
-            Write-Host "🔐 Requesting access token..."
-            $response = Invoke-RestMethod -Uri $tokenEndpoint -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+                  Write-Host "✅ OIDC Discovery HTTP request succeeded!" -ForegroundColor Green
+                  Write-Host "Status Code: $($discoveryResponse.StatusCode)"
+                  Write-Host "Content Type: $($discoveryResponse.Headers.'Content-Type')"
+                  Write-Host "Content Length: $($discoveryResponse.Content.Length) bytes"
+                  Write-Host ""
 
-            $accessToken = $response.access_token
-            if ([string]::IsNullOrEmpty($accessToken)) {
-              throw "Empty access token received"
-            }
+                  $discovery = $discoveryResponse.Content | ConvertFrom-Json
+                  $tokenEndpoint = $discovery.token_endpoint
 
-            # Save and mask token
-            "ACCESS_TOKEN=$accessToken" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Host "::add-mask::$accessToken"
+                  Write-Host "✅ OIDC Discovery parsed successfully!" -ForegroundColor Green
+                  Write-Host "Issuer: $($discovery.issuer)"
+                  Write-Host "Token Endpoint: $tokenEndpoint"
+                  Write-Host "Supported Grants: $($discovery.grant_types_supported -join ', ')"
 
-            $stepDuration = (Get-Date) - $stepStart
-            Write-Host "✅ Authentication successful (Token expires in: $($response.expires_in)s)"
-            Write-Host "⏱️  Step 1 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
-            Write-Host ""
+              } catch {
+                  Write-Host "❌ OIDC Discovery FAILED!" -ForegroundColor Red
+                  Write-Host "Error Type: $($_.Exception.GetType().FullName)"
+                  Write-Host "Error Message: $($_.Exception.Message)"
+
+                  if ($_.Exception.Response) {
+                      Write-Host "HTTP Status Code: $($_.Exception.Response.StatusCode.value__) - $($_.Exception.Response.StatusDescription)"
+                      Write-Host "Response URL: $($_.Exception.Response.ResponseUri)"
+
+                      try {
+                          $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                          $errorBody = $reader.ReadToEnd()
+                          Write-Host "`nError Response Body:"
+                          Write-Host $errorBody
+                      } catch {
+                          Write-Host "Could not read error response body"
+                      }
+                  }
+
+                  Write-Host "`n⚠️  Falling back to hardcoded endpoint..." -ForegroundColor Yellow
+                  $tokenEndpoint = "${{ secrets.ODC_PORTAL_URL }}/auth/realms/29ecfa4f-ec23-4ebe-8d8c-6d556d1daba4/protocol/openid-connect/token"
+                  Write-Host "Fallback Token Endpoint: $tokenEndpoint"
+              }
+
+              if ([string]::IsNullOrEmpty($tokenEndpoint)) {
+                  throw "FATAL: Could not determine token endpoint from discovery or fallback"
+              }
+
+              # === TOKEN REQUEST ATTEMPT ===
+              Write-Host ""
+              Write-Host "════════════════════════════════════════════════════════════════"
+              Write-Host "PHASE 1B: TOKEN REQUEST"
+              Write-Host "════════════════════════════════════════════════════════════════"
+
+              Write-Host "`n🔐 Requesting OAuth2 Access Token..."
+              Write-Host "Endpoint: $tokenEndpoint"
+              Write-Host "Method: POST"
+              Write-Host "Content-Type: application/x-www-form-urlencoded"
+              Write-Host "Grant Type: client_credentials"
+              Write-Host "Client ID: ${{ secrets.ODC_CLIENT_ID }}"
+              Write-Host ""
+
+              $body = @{
+                  grant_type    = "client_credentials"
+                  client_id     = "${{ secrets.ODC_CLIENT_ID }}"
+                  client_secret = "${{ secrets.ODC_CLIENT_SECRET }}"
+              }
+
+              try {
+                  $tokenResponse = Invoke-WebRequest -Uri $tokenEndpoint -Method Post -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -ErrorAction Stop
+
+                  Write-Host "✅ Token request HTTP succeeded!" -ForegroundColor Green
+                  Write-Host "Status Code: $($tokenResponse.StatusCode)"
+                  Write-Host "Content Type: $($tokenResponse.Headers.'Content-Type')"
+                  Write-Host ""
+
+                  $response = $tokenResponse.Content | ConvertFrom-Json
+                  $accessToken = $response.access_token
+
+                  if ([string]::IsNullOrEmpty($accessToken)) {
+                      throw "FATAL: Access token is empty in response"
+                  }
+
+                  Write-Host "✅ ACCESS TOKEN OBTAINED!" -ForegroundColor Green
+                  Write-Host "Token Type: $($response.token_type)"
+                  Write-Host "Token Length: $($accessToken.Length) characters"
+                  Write-Host "Expires In: $($response.expires_in) seconds ($([Math]::Round($response.expires_in / 3600, 1)) hours)"
+
+                  # Save and mask token
+                  "ACCESS_TOKEN=$accessToken" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                  Write-Host "::add-mask::$accessToken"
+
+                  $stepDuration = (Get-Date) - $stepStart
+                  Write-Host ""
+                  Write-Host "════════════════════════════════════════════════════════════════"
+                  Write-Host "✅ STEP 1 COMPLETE - AUTHENTICATION SUCCESSFUL"
+                  Write-Host "════════════════════════════════════════════════════════════════"
+                  Write-Host "⏱️  Total time: $($stepDuration.TotalSeconds.ToString('F2'))s"
+                  Write-Host ""
+
+              } catch {
+                  Write-Host "❌ TOKEN REQUEST FAILED!" -ForegroundColor Red
+                  Write-Host "Error Type: $($_.Exception.GetType().FullName)"
+                  Write-Host "Error Message: $($_.Exception.Message)"
+
+                  if ($_.Exception.Response) {
+                      Write-Host "`nHTTP Response Details:"
+                      Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__) - $($_.Exception.Response.StatusDescription)"
+                      Write-Host "Response URL: $($_.Exception.Response.ResponseUri)"
+
+                      try {
+                          $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                          $errorBody = $reader.ReadToEnd()
+                          Write-Host "`nError Response Body:"
+                          Write-Host $errorBody
+
+                          # Try to parse as JSON
+                          try {
+                              $errorJson = $errorBody | ConvertFrom-Json
+                              if ($errorJson.error) {
+                                  Write-Host "`nParsed OAuth Error:"
+                                  Write-Host "Error: $($errorJson.error)"
+                                  Write-Host "Description: $($errorJson.error_description)"
+                              }
+                          } catch {
+                              # Not JSON, already displayed above
+                          }
+                      } catch {
+                          Write-Host "Could not read error response body"
+                      }
+                  }
+
+                  throw "Token request failed - see details above"
+              }
 
           } catch {
-            Write-Error "❌ Step 1 failed: $($_.Exception.Message)"
-            if ($_.Exception.Response) {
-              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-              Write-Host "Error details: $($reader.ReadToEnd())"
-            }
-            exit 1
+              Write-Host ""
+              Write-Host "════════════════════════════════════════════════════════════════"
+              Write-Host "❌ STEP 1 FAILED - AUTHENTICATION ERROR"
+              Write-Host "════════════════════════════════════════════════════════════════"
+              Write-Host "Error: $($_.Exception.Message)"
+              Write-Host ""
+              Write-Host "🔍 TROUBLESHOOTING CHECKLIST:"
+              Write-Host "1. ✓ Check DNS resolution above"
+              Write-Host "2. ✓ Check TCP connectivity above"
+              Write-Host "3. ✓ Check OIDC Discovery result above"
+              Write-Host "4. ✓ Check token request result above"
+              Write-Host "5. Verify ODC_PORTAL_URL in GitHub Secrets"
+              Write-Host "6. Verify ODC_CLIENT_ID and ODC_CLIENT_SECRET"
+              Write-Host "7. Check API client permissions in ODC Portal"
+              Write-Host "8. Consider using self-hosted runner if network blocked"
+              Write-Host ""
+              exit 1
           }
 
       # ========================================================================
