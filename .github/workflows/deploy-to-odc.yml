@@ -493,30 +493,50 @@ jobs:
       # ========================================================================
       # STEP 2: Get Pre-signed Upload URL
       # ========================================================================
-      - name: "Step 2: Get Upload URL"
+      - name: "Step 2: Get Upload URL (Official API)"
         id: upload_url
         shell: pwsh
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
+          LIBRARY_KEY: ${{ secrets.ODC_LIBRARY_KEY }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 2: GET PRE-SIGNED UPLOAD URL"
+          Write-Host "STEP 2: GET UPLOAD URL (OFFICIAL API STEP 1)"
           Write-Host "════════════════════════════════════════════════════════════════"
 
+          Write-Host "`n📥 INPUTS:"
+          Write-Host "  ACCESS_TOKEN: $(if($env:ACCESS_TOKEN) {'***SET***'} else {'NOT SET'})"
+          Write-Host "  LIBRARY_KEY: $env:LIBRARY_KEY"
+          Write-Host ""
+
           try {
-            # Use the generic upload endpoint (works for both new and existing libraries)
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/uploads"
-            Write-Host "📡 GET $apiUrl"
+            # Official API Step 1: POST /api/external-library-generation/v1/libraries/{libraryKey}/upload-url
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-library-generation/v1/libraries/$env:LIBRARY_KEY/upload-url"
+            Write-Host "📡 REQUEST:"
+            Write-Host "  Method: POST"
+            Write-Host "  URL: $apiUrl"
+            Write-Host "  Headers: Authorization: Bearer ***"
+            Write-Host "  Body: (empty)"
+            Write-Host ""
 
             $headers = @{
               "Authorization" = "Bearer $env:ACCESS_TOKEN"
             }
 
-            $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers $headers
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
+
+            Write-Host "📋 RESPONSE:"
+            Write-Host ($response | ConvertTo-Json -Depth 3)
+            Write-Host ""
 
             $uploadUrl = $response.uploadUrl
             $downloadUrl = $response.downloadUrl
+
+            Write-Host "📤 EXTRACTED VALUES:"
+            Write-Host "  uploadUrl: $(if($uploadUrl) {'***SET***'} else {'MISSING'})"
+            Write-Host "  downloadUrl: $(if($downloadUrl) {'***SET***'} else {'MISSING'})"
+            Write-Host ""
 
             if ([string]::IsNullOrEmpty($uploadUrl) -or [string]::IsNullOrEmpty($downloadUrl)) {
               throw "Missing uploadUrl or downloadUrl in response"
@@ -547,23 +567,32 @@ jobs:
       # ========================================================================
       # STEP 3: Upload ZIP to S3
       # ========================================================================
-      - name: "Step 3: Upload ZIP to S3"
+      - name: "Step 3: Upload ZIP to S3 (Official API Step 2)"
         shell: pwsh
         env:
           UPLOAD_URL: ${{ steps.upload_url.outputs.UPLOAD_URL }}
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 3: UPLOAD ZIP TO S3"
+          Write-Host "STEP 3: UPLOAD ZIP TO S3 (OFFICIAL API STEP 2)"
           Write-Host "════════════════════════════════════════════════════════════════"
+
+          Write-Host "`n📥 INPUTS:"
+          Write-Host "  UPLOAD_URL: $(if($env:UPLOAD_URL) {'***SET***'} else {'NOT SET'})"
+          Write-Host "  ZIP_FILE: ${{ env.ZIP_FILE }}"
+          Write-Host ""
 
           try {
             $zipPath = Resolve-Path ${{ env.ZIP_FILE }}
             $zipBytes = [System.IO.File]::ReadAllBytes($zipPath)
             $zipSizeMB = $zipBytes.Length / 1MB
 
-            Write-Host "📦 File: ${{ env.ZIP_FILE }}"
-            Write-Host "📏 Size: $($zipSizeMB.ToString('F2')) MB"
+            Write-Host "📡 REQUEST:"
+            Write-Host "  Method: PUT"
+            Write-Host "  URL: ***uploadUrl***"
+            Write-Host "  Content-Type: application/zip"
+            Write-Host "  Body Size: $($zipSizeMB.ToString('F2')) MB"
+            Write-Host ""
             Write-Host "🚀 Uploading to S3..."
 
             $headers = @{
@@ -585,7 +614,7 @@ jobs:
       # ========================================================================
       # STEP 4: Register Upload and Create New Revision
       # ========================================================================
-      - name: "Step 4: Register Upload and Create Revision"
+      - name: "Step 4: Register Upload & Create Revision (Official API Step 3)"
         id: create_revision
         shell: pwsh
         env:
@@ -595,103 +624,84 @@ jobs:
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 4: REGISTER UPLOAD AND CREATE NEW REVISION"
+          Write-Host "STEP 4: REGISTER UPLOAD & CREATE NEW REVISION (OFFICIAL API STEP 3)"
           Write-Host "════════════════════════════════════════════════════════════════"
 
+          Write-Host "`n📥 INPUTS:"
+          Write-Host "  ACCESS_TOKEN: $(if($env:ACCESS_TOKEN) {'***SET***'} else {'NOT SET'})"
+          Write-Host "  LIBRARY_KEY: $env:LIBRARY_KEY"
+          Write-Host "  DOWNLOAD_URL: $(if($env:DOWNLOAD_URL) {'***SET***'} else {'NOT SET'})"
+          Write-Host ""
+
           try {
-            # Use generation-operations endpoint with library key to update existing library
-            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/generation-operations"
-            Write-Host "📡 POST $apiUrl"
-            Write-Host "Library Key: $env:LIBRARY_KEY"
+            # Official API Step 3: POST /api/external-library-generation/v1/libraries/{libraryKey}/uploads
+            $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-library-generation/v1/libraries/$env:LIBRARY_KEY/uploads"
 
             $headers = @{
               "Authorization" = "Bearer $env:ACCESS_TOKEN"
               "Content-Type" = "application/json"
             }
 
-            # Include library key to update existing library instead of creating new one
             $body = @{
-              fileName = "${{ env.ZIP_FILE }}"
-              highCodeBinaryUri = $env:DOWNLOAD_URL
-              libraryKey = $env:LIBRARY_KEY
+              downloadUrl = $env:DOWNLOAD_URL
             } | ConvertTo-Json
 
-            Write-Host "`nCreating generation operation for existing library..."
-            Write-Host "Body: $body"
+            Write-Host "📡 REQUEST:"
+            Write-Host "  Method: POST"
+            Write-Host "  URL: $apiUrl"
+            Write-Host "  Headers: Authorization: Bearer ***"
+            Write-Host "  Headers: Content-Type: application/json"
+            Write-Host "  Body:"
+            Write-Host $body
+            Write-Host ""
 
+            Write-Host "🔄 Registering upload and creating new revision..."
             $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
 
-            Write-Host "`n📋 Generation Response:"
+            Write-Host "`n📋 RESPONSE:"
             Write-Host ($response | ConvertTo-Json -Depth 5)
+            Write-Host ""
 
-            $operationKey = $response.operationKey
+            Write-Host "📤 EXTRACTED VALUES:"
+            Write-Host "  Response Properties: $($response.PSObject.Properties.Name -join ', ')"
 
-            if ([string]::IsNullOrEmpty($operationKey)) {
-              throw "operationKey not found in response"
-            }
+            # Per official docs, this endpoint should return revisionNumber directly
+            $revisionNumber = $response.revisionNumber
+            $libraryKey = $response.libraryKey
+            $assetKey = $response.assetKey
 
-            Write-Host "🔑 Operation Key: $operationKey"
+            if ([string]::IsNullOrEmpty($revisionNumber)) {
+              Write-Host "❌ revisionNumber not found in response!"
+              Write-Host "Checking for async operation..."
 
-            # Poll for generation completion
-            Write-Host "`n⏳ Polling for generation completion..."
-            $pollUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/generation-operations/$operationKey"
-
-            $maxAttempts = 36
-            $attempt = 0
-
-            while ($attempt -lt $maxAttempts) {
-              $attempt++
-              Write-Host "  [$attempt/$maxAttempts] Checking status..."
-
-              $pollResponse = Invoke-RestMethod -Uri $pollUrl -Method Get -Headers $headers
-              $status = $pollResponse.status
-
-              if ($status -eq "ReadyForReview") {
-                Write-Host "✅ Generation completed!"
-
-                $libraryKey = $pollResponse.libraryKey
-                $libraryName = $pollResponse.libraryName
-
-                Write-Host "🔑 Library Key: $libraryKey"
-                Write-Host "📚 Library Name: $libraryName"
-
-                # Query for the new revision
-                Write-Host "`n📡 Querying for new revision..."
-                $revisionsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$libraryKey/revisions"
-                $revisionsResponse = Invoke-RestMethod -Uri $revisionsUrl -Method Get -Headers $headers
-                $revisions = $revisionsResponse.results
-
-                # Get the latest UNTAGGED revision
-                $untaggedRevisions = $revisions | Where-Object { -not $_.tag } | Sort-Object -Property revision -Descending
-
-                if ($untaggedRevisions.Count -gt 0) {
-                  $revisionNumber = $untaggedRevisions[0].revision
-                  Write-Host "✅ Found new revision: $revisionNumber"
-                } else {
-                  $revisionNumber = ($revisions | Sort-Object -Property revision -Descending | Select-Object -First 1).revision
-                  Write-Host "⚠️  Using latest revision: $revisionNumber"
-                }
-
-                # Save for Step 5
-                "LIBRARY_KEY=$libraryKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-                "LIBRARY_NAME=$libraryName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-                "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-                $stepDuration = (Get-Date) - $stepStart
-                Write-Host "`n⏱️  Step 4 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
-                break
+              $operationKey = $response.operationKey
+              if ($operationKey) {
+                Write-Host "Found operationKey: $operationKey"
+                Write-Host "⚠️  API is async - this is UNEXPECTED per official docs"
+                Write-Host "The official API should return revisionNumber immediately"
+                throw "API returned async operation instead of revision - check library key or API version"
+              } else {
+                throw "revisionNumber not found in response and no operationKey for polling"
               }
-
-              if ($status -eq "Failed" -or $status -eq "Error") {
-                throw "Generation failed with status: $status"
-              }
-
-              Start-Sleep -Seconds 5
             }
 
-            if ($attempt -ge $maxAttempts) {
-              throw "Timeout waiting for generation"
-            }
+            Write-Host "  libraryKey: $(if($libraryKey) {$libraryKey} else {'NOT FOUND'})"
+            Write-Host "  assetKey: $(if($assetKey) {$assetKey} else {'NOT FOUND'})"
+            Write-Host "  revisionNumber: $revisionNumber"
+            Write-Host ""
+
+            Write-Host "✅ New revision created: $revisionNumber"
+
+            # Use assetKey if present, otherwise fall back to libraryKey
+            $finalAssetKey = if ($assetKey) { $assetKey } else { $libraryKey }
+
+            # Save for Step 5
+            "LIBRARY_KEY=$finalAssetKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+            $stepDuration = (Get-Date) - $stepStart
+            Write-Host "⏱️  Step 4 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+            Write-Host ""
 
           } catch {
             Write-Error "❌ Step 4 failed: $($_.Exception.Message)"
