@@ -136,6 +136,26 @@ jobs:
             Write-Host "Removed existing ZIP file"
           }
 
+          # List files in publish folder before zipping
+          Write-Host "`n📋 Files in publish folder:"
+          Get-ChildItem -Path ./publish -Recurse -File | ForEach-Object {
+            Write-Host "  $($_.FullName.Replace((Get-Location).Path, '.'))"
+          }
+
+          # Check specifically for BuildInfo
+          $buildInfoFiles = Get-ChildItem -Path ./publish -Recurse -Filter "*BuildInfo*"
+          if ($buildInfoFiles) {
+            Write-Host "`n✅ BuildInfo files found:"
+            $buildInfoFiles | ForEach-Object {
+              Write-Host "  - $($_.Name)"
+            }
+          } else {
+            Write-Host "`n⚠️  WARNING: No BuildInfo files found in publish folder!"
+            Write-Host "This means unique build metadata is NOT being included."
+          }
+
+          Write-Host ""
+
           # Create new ZIP archive
           Compress-Archive -Path ./publish/* -DestinationPath ${{ env.ZIP_FILE }} -Force
 
