@@ -444,14 +444,13 @@ jobs:
 
           try {
             $apiUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-libraries/v1/uploads"
-            Write-Host "📡 POST $apiUrl"
+            Write-Host "📡 GET $apiUrl"
 
             $headers = @{
               "Authorization" = "Bearer $env:ACCESS_TOKEN"
-              "Content-Type" = "application/json"
             }
 
-            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers $headers
 
             $uploadUrl = $response.uploadUrl
             $downloadUrl = $response.downloadUrl
