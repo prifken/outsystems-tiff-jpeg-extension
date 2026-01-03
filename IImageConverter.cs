@@ -198,6 +198,47 @@ public interface IImageConverter
         int expirationMinutes = 15);
 
     /// <summary>
+    /// Downloads a file from S3 and returns it as binary data
+    /// Use this to download converted JPEG files for display or download in OutSystems
+    /// </summary>
+    /// <param name="bucketName">S3 bucket name</param>
+    /// <param name="s3Key">S3 key of file to download (e.g., 'converted/document.jpg')</param>
+    /// <param name="awsAccessKey">AWS Access Key ID</param>
+    /// <param name="awsSecretKey">AWS Secret Access Key</param>
+    /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
+    /// <returns>Download result with binary file data</returns>
+    [OSAction(
+        Description = "Download a file from S3 as binary data (for display or download in OutSystems)",
+        ReturnName = "result",
+        ReturnDescription = "Download result with binary file data, filename, and metadata",
+        ReturnType = OSDataType.InferredFromDotNetType)]
+    S3DownloadResult DownloadFileFromS3(
+        [OSParameter(
+            Description = "S3 bucket name",
+            DataType = OSDataType.Text)]
+        string bucketName,
+
+        [OSParameter(
+            Description = "S3 key of file to download (e.g., 'converted/document.jpg')",
+            DataType = OSDataType.Text)]
+        string s3Key,
+
+        [OSParameter(
+            Description = "AWS Access Key ID",
+            DataType = OSDataType.Text)]
+        string awsAccessKey,
+
+        [OSParameter(
+            Description = "AWS Secret Access Key",
+            DataType = OSDataType.Text)]
+        string awsSecretKey,
+
+        [OSParameter(
+            Description = "AWS Region (default: us-east-1)",
+            DataType = OSDataType.Text)]
+        string awsRegion = "us-east-1");
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>

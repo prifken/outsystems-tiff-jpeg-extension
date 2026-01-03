@@ -836,6 +836,88 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
+    /// Downloads a file from S3 and returns it as binary data
+    /// Use this to download converted JPEG files for display or download in OutSystems
+    /// </summary>
+    public S3DownloadResult DownloadFileFromS3(
+        string bucketName,
+        string s3Key,
+        string awsAccessKey,
+        string awsSecretKey,
+        string awsRegion = "us-east-1")
+    {
+        try
+        {
+            // Validate inputs
+            if (string.IsNullOrWhiteSpace(bucketName))
+                return new S3DownloadResult { Success = false, Message = "Bucket name cannot be empty" };
+
+            if (string.IsNullOrWhiteSpace(s3Key))
+                return new S3DownloadResult { Success = false, Message = "S3 key cannot be empty" };
+
+            if (string.IsNullOrWhiteSpace(awsAccessKey) || string.IsNullOrWhiteSpace(awsSecretKey))
+                return new S3DownloadResult { Success = false, Message = "AWS credentials cannot be empty" };
+
+            // Create AWS credentials and S3 client
+            var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
+            var regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
+
+            using var s3Client = new AmazonS3Client(credentials, regionEndpoint);
+
+            // Download file from S3
+            var getRequest = new GetObjectRequest
+            {
+                BucketName = bucketName,
+                Key = s3Key
+            };
+
+            using var getResponse = s3Client.GetObjectAsync(getRequest).GetAwaiter().GetResult();
+
+            // Read file data into memory
+            using var memoryStream = new MemoryStream();
+            getResponse.ResponseStream.CopyTo(memoryStream);
+            var fileData = memoryStream.ToArray();
+
+            // Extract filename from S3 key (everything after last '/')
+            var fileName = s3Key.Contains('/') ? s3Key.Substring(s3Key.LastIndexOf('/') + 1) : s3Key;
+
+            return new S3DownloadResult
+            {
+                Success = true,
+                Message = $"File downloaded successfully from s3://{bucketName}/{s3Key}",
+                FileData = fileData,
+                FileName = fileName,
+                ContentType = getResponse.Headers.ContentType,
+                FileSize = getResponse.ContentLength
+            };
+        }
+        catch (AmazonS3Exception s3Ex)
+        {
+            return new S3DownloadResult
+            {
+                Success = false,
+                Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
+                FileData = Array.Empty<byte>(),
+                FileName = string.Empty,
+                ContentType = string.Empty,
+                FileSize = 0
+            };
+        }
+        catch (Exception ex)
+        {
+            return new S3DownloadResult
+            {
+                Success = false,
+                Message = $"Download error: {ex.Message}",
+                FileData = Array.Empty<byte>(),
+                FileName = string.Empty,
+                ContentType = string.Empty,
+                FileSize = 0
+            };
+        }
+    }
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>

@@ -137,3 +137,46 @@ public struct S3UploadUrlResult
         IsMandatory = false)]
     public string ExpiresAt;
 }
+
+/// <summary>
+/// Result structure for S3 file download operations
+/// </summary>
+[OSStructure(Description = "Result from downloading a file from S3")]
+public struct S3DownloadResult
+{
+    [OSStructureField(
+        Description = "Indicates if download was successful",
+        DataType = OSDataType.Boolean,
+        IsMandatory = true)]
+    public bool Success;
+
+    [OSStructureField(
+        Description = "Status message or error details",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string Message;
+
+    [OSStructureField(
+        Description = "Downloaded file as binary data",
+        DataType = OSDataType.BinaryData,
+        IsMandatory = false)]
+    public byte[] FileData;
+
+    [OSStructureField(
+        Description = "Original filename extracted from S3 key",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string FileName;
+
+    [OSStructureField(
+        Description = "File content type (e.g., 'image/jpeg')",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string ContentType;
+
+    [OSStructureField(
+        Description = "File size in bytes",
+        DataType = OSDataType.LongInteger,
+        IsMandatory = false)]
+    public long FileSize;
+}
