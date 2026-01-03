@@ -81,4 +81,11 @@ public interface IImageConverter
     /// <returns>Echoed message with timestamp</returns>
     [OSAction(Description = "Echo a test message")]
     string EchoMessage(string message);
+
+    /// <summary>
+    /// Gets the build version and metadata for this library
+    /// </summary>
+    /// <returns>Build version information</returns>
+    [OSAction(Description = "Get library build version and metadata")]
+    string GetBuildVersion();
 }

@@ -104,4 +104,16 @@ public class ImageConverter : IImageConverter
         var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
         return $"Echo: {message} | Timestamp: {timestamp} | Environment: {environment}";
     }
+
+    /// <summary>
+    /// Gets the build version and metadata for this library
+    /// This changes with every build to force unique revisions in ODC
+    /// </summary>
+    /// <returns>Build version information</returns>
+    public string GetBuildVersion()
+    {
+        // This line is updated by CI/CD on every build
+        var buildMetadata = "BUILD_METADATA_PLACEHOLDER";
+        return $"ImageConverter Build Version | {buildMetadata}";
+    }
 }
