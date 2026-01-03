@@ -52,3 +52,10 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Build artifacts (ODC deployment packages)
+*.zip
+publish/
+
+# Claude Code metadata
+.claude/
