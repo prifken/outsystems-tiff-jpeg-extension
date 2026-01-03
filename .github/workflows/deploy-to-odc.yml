@@ -715,10 +715,38 @@ jobs:
 
           } catch {
             Write-Error "❌ Step 6 failed: $($_.Exception.Message)"
+
             if ($_.Exception.Response) {
-              $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-              Write-Host "Error details: $($reader.ReadToEnd())"
+                Write-Host "`n📋 HTTP Response Details:"
+                Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+                Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
+
+                try {
+                    $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                    $errorBody = $reader.ReadToEnd()
+                    Write-Host "`n📄 Error Response Body:"
+                    Write-Host $errorBody
+
+                    # Try to parse as JSON for better readability
+                    try {
+                        $errorJson = $errorBody | ConvertFrom-Json
+                        Write-Host "`n📝 Parsed Error Details:"
+                        Write-Host ($errorJson | ConvertTo-Json -Depth 5)
+                    } catch {
+                        # Already displayed raw body above
+                    }
+                } catch {
+                    Write-Host "Could not read error response body"
+                }
             }
+
+            # Also log what we sent
+            Write-Host "`n📤 Request Details:"
+            Write-Host "URL: $apiUrl"
+            Write-Host "Method: PATCH"
+            Write-Host "Body sent:"
+            Write-Host $body
+
             exit 1
           }
 
