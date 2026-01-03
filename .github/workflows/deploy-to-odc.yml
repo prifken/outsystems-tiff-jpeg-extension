@@ -550,9 +550,17 @@ jobs:
 
             $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
 
+            # Log the response for debugging
+            Write-Host "`n📋 API Response:"
+            Write-Host ($response | ConvertTo-Json -Depth 5)
+            Write-Host ""
+
             $operationKey = $response.key
 
             if ([string]::IsNullOrEmpty($operationKey)) {
+              Write-Host "⚠️  Response structure:"
+              Write-Host "Response type: $($response.GetType().FullName)"
+              Write-Host "Properties: $($response.PSObject.Properties.Name -join ', ')"
               throw "Missing operation key in response"
             }
 
