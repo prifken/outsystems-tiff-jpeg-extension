@@ -555,7 +555,7 @@ jobs:
             Write-Host ($response | ConvertTo-Json -Depth 5)
             Write-Host ""
 
-            $operationKey = $response.key
+            $operationKey = $response.operationKey
 
             if ([string]::IsNullOrEmpty($operationKey)) {
               Write-Host "⚠️  Response structure:"
