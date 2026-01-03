@@ -692,13 +692,59 @@ jobs:
 
               $revisions = Invoke-RestMethod -Uri $revisionsUrl -Method Get -Headers $headers
 
-              Write-Host "`n📋 Found $($revisions.Count) revision(s)"
+              Write-Host "`n📋 Full Revisions Response:"
+              Write-Host ($revisions | ConvertTo-Json -Depth 5)
+              Write-Host ""
 
-              # Get the latest revision (highest number)
-              $latestRevision = $revisions | Sort-Object -Property revisionNumber -Descending | Select-Object -First 1
-              $revisionNumber = $latestRevision.revisionNumber
+              # Check response structure
+              if ($revisions -is [Array]) {
+                  Write-Host "Response is an array with $($revisions.Count) item(s)"
+              } elseif ($revisions.items) {
+                  Write-Host "Response has 'items' property with $($revisions.items.Count) item(s)"
+                  $revisions = $revisions.items
+              } elseif ($revisions.revisions) {
+                  Write-Host "Response has 'revisions' property with $($revisions.revisions.Count) item(s)"
+                  $revisions = $revisions.revisions
+              } else {
+                  Write-Host "Response type: $($revisions.GetType().FullName)"
+                  Write-Host "Properties: $($revisions.PSObject.Properties.Name -join ', ')"
+              }
 
-              Write-Host "✅ Latest revision: $revisionNumber"
+              # Get the latest revision
+              if ($revisions.Count -gt 0) {
+                  Write-Host "`nRevisions found: $($revisions.Count)"
+
+                  # Show first revision structure
+                  Write-Host "`nFirst revision structure:"
+                  Write-Host ($revisions[0] | ConvertTo-Json -Depth 3)
+
+                  # Try different property names for revision number
+                  $latestRevision = $revisions | Sort-Object -Property @{Expression={
+                      if ($_.revisionNumber) { $_.revisionNumber }
+                      elseif ($_.revision) { $_.revision }
+                      elseif ($_.number) { $_.number }
+                      elseif ($_.id) { $_.id }
+                      else { 0 }
+                  }} -Descending | Select-Object -First 1
+
+                  # Extract revision number
+                  if ($latestRevision.revisionNumber) {
+                      $revisionNumber = $latestRevision.revisionNumber
+                  } elseif ($latestRevision.revision) {
+                      $revisionNumber = $latestRevision.revision
+                  } elseif ($latestRevision.number) {
+                      $revisionNumber = $latestRevision.number
+                  } elseif ($latestRevision.id) {
+                      $revisionNumber = $latestRevision.id
+                  } else {
+                      Write-Host "⚠️  Revision object properties: $($latestRevision.PSObject.Properties.Name -join ', ')"
+                      throw "Could not determine revision number from response"
+                  }
+
+                  Write-Host "✅ Latest revision: $revisionNumber (type: $($revisionNumber.GetType().Name))"
+              } else {
+                  throw "No revisions found in response"
+              }
 
               # Step 6B: Get build key for Release build type
               $buildsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/builds/v1/build-operations?assetKey=$env:LIBRARY_KEY&assetRevision=$revisionNumber&byBuildType=Release"
