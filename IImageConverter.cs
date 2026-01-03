@@ -66,4 +66,11 @@ public interface IImageConverter
             Description = "JPEG quality (1-100)",
             DataType = OSDataType.Integer)]
         int quality = 85);
+
+    /// <summary>
+    /// Gets the current server timestamp for testing
+    /// </summary>
+    /// <returns>Current UTC timestamp</returns>
+    [OSAction(Description = "Get current timestamp for testing")]
+    string GetCurrentTimestamp();
 }

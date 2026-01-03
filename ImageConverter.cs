@@ -83,4 +83,13 @@ public class ImageConverter : IImageConverter
             PagesConverted = 0
         };
     }
+
+    /// <summary>
+    /// Gets the current server timestamp for testing
+    /// </summary>
+    /// <returns>Current UTC timestamp</returns>
+    public string GetCurrentTimestamp()
+    {
+        return $"Server time: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss UTC}";
+    }
 }
