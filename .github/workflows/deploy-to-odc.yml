@@ -116,9 +116,7 @@ jobs:
     name: Deploy to ODC Development
     runs-on: windows-latest
     needs: build
-    environment:
-      name: development
-      url: ${{ secrets.ODC_PORTAL_URL }}
+    environment: development
 
     steps:
       # Step 1: Download the build artifact
