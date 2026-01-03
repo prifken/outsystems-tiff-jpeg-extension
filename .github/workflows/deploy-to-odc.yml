@@ -140,7 +140,7 @@ jobs:
             exit 1
           }
 
-      # Step 3: Obtain OAuth 2.0 access token from ODC
+      # Step 3: Obtain OAuth 2.0 access token from ODC using OIDC Discovery
       - name: Get ODC access token
         id: auth
         shell: pwsh
@@ -148,19 +148,32 @@ jobs:
           Write-Host "🔐 Authenticating with ODC..."
 
           try {
-            # Prepare OAuth token request
-            $tokenUrl = "${{ secrets.ODC_PORTAL_URL }}/identity/connect/token"
+            # Step 1: Get OIDC Discovery document to find the token endpoint
+            $discoveryUrl = "${{ secrets.ODC_PORTAL_URL }}/.well-known/openid-configuration"
+            Write-Host "Fetching OIDC Discovery from: $discoveryUrl"
 
-            # Build form data for client credentials grant
+            $discovery = Invoke-RestMethod -Uri $discoveryUrl -Method Get
+
+            # Step 2: Extract token endpoint from discovery document
+            $tokenEndpoint = $discovery.token_endpoint
+
+            if ([string]::IsNullOrEmpty($tokenEndpoint)) {
+              Write-Error "❌ Failed to get token endpoint from OIDC Discovery"
+              exit 1
+            }
+
+            Write-Host "✅ OIDC Discovery successful"
+            Write-Host "Token endpoint: $tokenEndpoint"
+
+            # Step 3: Request access token using client credentials
             $body = @{
               grant_type    = "client_credentials"
               client_id     = "${{ secrets.ODC_CLIENT_ID }}"
               client_secret = "${{ secrets.ODC_CLIENT_SECRET }}"
             }
 
-            # Request access token
-            Write-Host "Requesting access token from: $tokenUrl"
-            $response = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+            Write-Host "Requesting access token..."
+            $response = Invoke-RestMethod -Uri $tokenEndpoint -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
 
             # Extract access token
             $accessToken = $response.access_token
@@ -182,7 +195,18 @@ jobs:
 
           } catch {
             Write-Error "❌ Authentication failed: $($_.Exception.Message)"
-            Write-Host "Response: $($_.Exception.Response | ConvertTo-Json -Depth 3)"
+
+            # Try to get detailed error response
+            if ($_.Exception.Response) {
+              try {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $errorResponse = $reader.ReadToEnd()
+                Write-Host "Error details: $errorResponse"
+              } catch {
+                Write-Host "Could not read error response"
+              }
+            }
+
             exit 1
           }
 
