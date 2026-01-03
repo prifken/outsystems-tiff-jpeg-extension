@@ -667,9 +667,9 @@ jobs:
           }
 
       # ========================================================================
-      # STEP 6: Get Revision and Build Key
+      # STEP 6: Tag Library Revision
       # ========================================================================
-      - name: "Step 6: Get Revision and Build Key"
+      - name: "Step 6: Tag Library Revision"
         id: release
         shell: pwsh
         env:
@@ -678,11 +678,10 @@ jobs:
         run: |
           $stepStart = Get-Date
           Write-Host "════════════════════════════════════════════════════════════════"
-          Write-Host "STEP 6: GET REVISION AND BUILD KEY"
+          Write-Host "STEP 6: TAG LIBRARY REVISION"
           Write-Host "════════════════════════════════════════════════════════════════"
 
           try {
-              # Step 6A: Get list of revisions
               $revisionsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY/revisions"
               Write-Host "📡 GET $revisionsUrl"
 
@@ -690,94 +689,76 @@ jobs:
                   "Authorization" = "Bearer $env:ACCESS_TOKEN"
               }
 
-              $revisions = Invoke-RestMethod -Uri $revisionsUrl -Method Get -Headers $headers
+              $response = Invoke-RestMethod -Uri $revisionsUrl -Method Get -Headers $headers
+              $revisions = $response.results
 
-              Write-Host "`n📋 Full Revisions Response:"
-              Write-Host ($revisions | ConvertTo-Json -Depth 5)
-              Write-Host ""
+              Write-Host "`n📋 Found $($revisions.Count) revision(s)"
 
-              # Check response structure
-              if ($revisions -is [Array]) {
-                  Write-Host "Response is an array with $($revisions.Count) item(s)"
-              } elseif ($revisions.items) {
-                  Write-Host "Response has 'items' property with $($revisions.items.Count) item(s)"
-                  $revisions = $revisions.items
-              } elseif ($revisions.revisions) {
-                  Write-Host "Response has 'revisions' property with $($revisions.revisions.Count) item(s)"
-                  $revisions = $revisions.revisions
+              # Get latest revision
+              $latestRevision = $revisions | Sort-Object -Property revision -Descending | Select-Object -First 1
+              $revisionNumber = $latestRevision.revision
+
+              Write-Host "Latest revision: $revisionNumber"
+              Write-Host "Current tag: $($latestRevision.tag)"
+              Write-Host "Tagged at: $($latestRevision.taggedAt)"
+
+              # Check if already tagged
+              if ($latestRevision.tag -and $latestRevision.taggedAt) {
+                  Write-Host "`n✅ Revision $revisionNumber is already tagged as '$($latestRevision.tag)'"
+                  Write-Host "This revision was deployed in a previous run."
+
+                  $stepDuration = (Get-Date) - $stepStart
+                  Write-Host "`n⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
+
               } else {
-                  Write-Host "Response type: $($revisions.GetType().FullName)"
-                  Write-Host "Properties: $($revisions.PSObject.Properties.Name -join ', ')"
-              }
+                  Write-Host "`n📝 Revision $revisionNumber is not tagged yet - tagging now..."
 
-              # Get the latest revision
-              if ($revisions.Count -gt 0) {
-                  Write-Host "`nRevisions found: $($revisions.Count)"
+                  # Calculate next version number
+                  $allTags = $revisions | Where-Object { $_.tag } | Select-Object -ExpandProperty tag | Sort-Object -Descending
 
-                  # Show first revision structure
-                  Write-Host "`nFirst revision structure:"
-                  Write-Host ($revisions[0] | ConvertTo-Json -Depth 3)
+                  if ($allTags.Count -gt 0) {
+                      $latestTag = $allTags[0]
+                      Write-Host "Previous latest tag: $latestTag"
 
-                  # Try different property names for revision number
-                  $latestRevision = $revisions | Sort-Object -Property @{Expression={
-                      if ($_.revisionNumber) { $_.revisionNumber }
-                      elseif ($_.revision) { $_.revision }
-                      elseif ($_.number) { $_.number }
-                      elseif ($_.id) { $_.id }
-                      else { 0 }
-                  }} -Descending | Select-Object -First 1
-
-                  # Extract revision number
-                  if ($latestRevision.revisionNumber) {
-                      $revisionNumber = $latestRevision.revisionNumber
-                  } elseif ($latestRevision.revision) {
-                      $revisionNumber = $latestRevision.revision
-                  } elseif ($latestRevision.number) {
-                      $revisionNumber = $latestRevision.number
-                  } elseif ($latestRevision.id) {
-                      $revisionNumber = $latestRevision.id
+                      # Parse version (assumes format like "0.1.1")
+                      if ($latestTag -match '^(\d+)\.(\d+)\.(\d+)') {
+                          $major = [int]$matches[1]
+                          $minor = [int]$matches[2]
+                          $patch = [int]$matches[3] + 1
+                          $newTag = "$major.$minor.$patch"
+                      } else {
+                          # Fallback to run number
+                          $newTag = "0.1.${{ github.run_number }}"
+                      }
                   } else {
-                      Write-Host "⚠️  Revision object properties: $($latestRevision.PSObject.Properties.Name -join ', ')"
-                      throw "Could not determine revision number from response"
+                      $newTag = "0.1.0"
                   }
 
-                  Write-Host "✅ Latest revision: $revisionNumber (type: $($revisionNumber.GetType().Name))"
-              } else {
-                  throw "No revisions found in response"
+                  Write-Host "New tag: $newTag"
+
+                  # Tag the revision
+                  $tagUrl = "${{ secrets.ODC_PORTAL_URL }}/api/asset-repository/v1/assets/$env:LIBRARY_KEY/revisions/$revisionNumber"
+                  Write-Host "`n📡 PATCH $tagUrl"
+
+                  $headers["Content-Type"] = "application/json"
+
+                  $body = @{
+                      tag = $newTag
+                      releaseNotes = "Automated deployment from GitHub Actions`nRun #${{ github.run_number }}`nCommit: ${{ github.sha }}"
+                      commitMessage = "Automated release $newTag"
+                  } | ConvertTo-Json
+
+                  $tagResponse = Invoke-RestMethod -Uri $tagUrl -Method Patch -Headers $headers -Body $body
+
+                  Write-Host "✅ Successfully tagged revision $revisionNumber as $newTag"
+
+                  $stepDuration = (Get-Date) - $stepStart
+                  Write-Host "`n⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
               }
 
-              # Step 6B: Get build key for Release build type
-              $buildsUrl = "${{ secrets.ODC_PORTAL_URL }}/api/builds/v1/build-operations?assetKey=$env:LIBRARY_KEY&assetRevision=$revisionNumber&byBuildType=Release"
-              Write-Host "`n📡 GET $buildsUrl"
-
-              $builds = Invoke-RestMethod -Uri $buildsUrl -Method Get -Headers $headers
-
-              Write-Host "`n📋 Builds response:"
-              Write-Host ($builds | ConvertTo-Json -Depth 3)
-
-              # Extract build key from response
-              $buildKey = $null
-              if ($builds.items -and $builds.items.Count -gt 0) {
-                  $buildKey = $builds.items[0].key
-              } elseif ($builds.key) {
-                  $buildKey = $builds.key
-              } elseif ($builds.buildKey) {
-                  $buildKey = $builds.buildKey
-              }
-
-              if ([string]::IsNullOrEmpty($buildKey)) {
-                  throw "Could not find build key in response"
-              }
-
-              Write-Host "✅ Build key: $buildKey"
-
-              # Save for next step
-              "BUILD_KEY=$buildKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              # Save revision info for Step 7
               "REVISION_NUMBER=$revisionNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-              $stepDuration = (Get-Date) - $stepStart
-              Write-Host "`n⏱️  Step 6 completed in $($stepDuration.TotalSeconds.ToString('F2'))s"
-              Write-Host ""
+              "VERSION_TAG=$newTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
           } catch {
               Write-Error "❌ Step 6 failed: $($_.Exception.Message)"
@@ -796,6 +777,9 @@ jobs:
       - name: "Step 7: Deployment Complete"
         id: deploy
         shell: pwsh
+        env:
+          VERSION_TAG: ${{ steps.release.outputs.VERSION_TAG }}
+          LIBRARY_NAME: ${{ steps.poll.outputs.LIBRARY_NAME }}
         run: |
           Write-Host "════════════════════════════════════════════════════════════════"
           Write-Host "🎉 DEPLOYMENT COMPLETE!"
@@ -804,7 +788,7 @@ jobs:
           Write-Host "Library has been successfully:"
           Write-Host "✅ Uploaded to ODC"
           Write-Host "✅ Generated and processed"
-          Write-Host "✅ Tagged as release version 0.1.0"
+          Write-Host "✅ Tagged as release version $env:VERSION_TAG"
           Write-Host ""
           Write-Host "The library is now available in ODC Portal for:"
           Write-Host "- Manual deployment to stages"
@@ -813,7 +797,7 @@ jobs:
           Write-Host ""
           Write-Host "Next steps in ODC Portal:"
           Write-Host "1. Navigate to Libraries section"
-          Write-Host "2. Find your library (check Step 5 output for name)"
+          Write-Host "2. Find your library: $env:LIBRARY_NAME"
           Write-Host "3. Deploy the tagged revision to desired stage"
           Write-Host ""
 
@@ -826,15 +810,16 @@ jobs:
         env:
           LIBRARY_NAME: ${{ steps.poll.outputs.LIBRARY_NAME }}
           LIBRARY_KEY: ${{ steps.poll.outputs.LIBRARY_KEY }}
-          RELEASE_KEY: ${{ steps.release.outputs.RELEASE_KEY }}
+          REVISION_NUMBER: ${{ steps.release.outputs.REVISION_NUMBER }}
+          VERSION_TAG: ${{ steps.release.outputs.VERSION_TAG }}
         run: |
           Write-Output "## 🎉 Deployment Successful" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "### Library Information" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "- **Name:** $env:LIBRARY_NAME" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "- **Library Key:** ``$env:LIBRARY_KEY``" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- **Release Key:** ``$env:RELEASE_KEY``" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "- **Version:** 0.1.${{ github.run_number }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Revision:** $env:REVISION_NUMBER" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- **Version Tag:** $env:VERSION_TAG" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "### Deployment Details" >> $env:GITHUB_STEP_SUMMARY
           Write-Output "- **Environment:** Development" >> $env:GITHUB_STEP_SUMMARY
