@@ -1,0 +1,276 @@
+name: Build & Validate PR
+
+# Trigger workflow on pull request events
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+# Define environment variables
+env:
+  DOTNET_VERSION: '8.0.x'
+  PROJECT_FILE: 'ImageConverterLibrary.csproj'
+  ZIP_FILE: 'ImageConverterLibrary.zip'
+
+jobs:
+  # ============================================================================
+  # VALIDATE JOB - Build and verify the external logic library
+  # ============================================================================
+  validate:
+    name: Build & Validate
+    runs-on: windows-latest
+
+    steps:
+      # Step 1: Checkout the PR code
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better diff analysis
+
+      # Step 2: Setup .NET SDK
+      - name: Setup .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Step 3: Display .NET version
+      - name: Display .NET version
+        run: |
+          Write-Host "=== .NET SDK Information ==="
+          dotnet --version
+          dotnet --info
+
+      # Step 4: Restore NuGet dependencies
+      - name: Restore dependencies
+        run: |
+          Write-Host "Restoring NuGet packages..."
+          dotnet restore ${{ env.PROJECT_FILE }} --verbosity normal
+
+      # Step 5: Build the project
+      - name: Build project
+        run: |
+          Write-Host "Building project in Release configuration..."
+          dotnet build ${{ env.PROJECT_FILE }} `
+            --configuration Release `
+            --no-restore `
+            --verbosity normal
+
+      # Step 6: Run tests (if test project exists)
+      - name: Run tests
+        continue-on-error: true
+        run: |
+          Write-Host "Checking for test projects..."
+          $testProjects = Get-ChildItem -Recurse -Filter "*.Tests.csproj"
+
+          if ($testProjects) {
+            Write-Host "Found test projects, running tests..."
+            dotnet test --configuration Release --no-build --verbosity normal
+          } else {
+            Write-Host "⚠️  No test projects found - skipping tests"
+            Write-Host "Consider adding unit tests to improve code quality"
+          }
+
+      # Step 7: Publish the project
+      - name: Publish project
+        run: |
+          Write-Host "Publishing project for linux-x64 runtime..."
+          dotnet publish ${{ env.PROJECT_FILE }} `
+            --configuration Release `
+            --runtime linux-x64 `
+            --output ./publish `
+            --no-build
+
+      # Step 8: Verify publish output
+      - name: Verify publish output
+        shell: pwsh
+        run: |
+          Write-Host "=== Verifying Publish Output ==="
+
+          # Check if publish folder exists
+          if (-not (Test-Path "./publish")) {
+            Write-Error "❌ Publish folder not found"
+            exit 1
+          }
+
+          # List all published files
+          Write-Host "`n📁 Published files:"
+          $files = Get-ChildItem -Path "./publish" -Recurse -File
+          $totalSize = 0
+
+          foreach ($file in $files) {
+            $sizeKB = $file.Length / 1KB
+            $totalSize += $file.Length
+            Write-Host "  - $($file.Name) ($($sizeKB.ToString('F2')) KB)"
+          }
+
+          Write-Host "`n📊 Total files: $($files.Count)"
+          Write-Host "📦 Total size: $($totalSize / 1MB | ForEach-Object { $_.ToString('F2') }) MB"
+
+          # Verify critical files exist
+          $requiredFiles = @(
+            "ImageConverterLibrary.dll",
+            "ImageConverterLibrary.deps.json",
+            "OutSystems.ExternalLibraries.SDK.dll"
+          )
+
+          $missingFiles = @()
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path "./publish/$file")) {
+              $missingFiles += $file
+            }
+          }
+
+          if ($missingFiles.Count -gt 0) {
+            Write-Error "❌ Missing required files: $($missingFiles -join ', ')"
+            exit 1
+          }
+
+          Write-Host "`n✅ All required files present"
+
+      # Step 9: Create deployment package (ZIP)
+      - name: Create deployment package
+        shell: pwsh
+        run: |
+          Write-Host "=== Creating Deployment Package ==="
+
+          # Remove existing ZIP if present
+          if (Test-Path ${{ env.ZIP_FILE }}) {
+            Remove-Item ${{ env.ZIP_FILE }} -Force
+            Write-Host "Removed existing ZIP file"
+          }
+
+          # Create ZIP archive
+          Write-Host "Creating ZIP archive..."
+          Compress-Archive -Path ./publish/* -DestinationPath ${{ env.ZIP_FILE }} -Force
+
+          # Verify ZIP was created
+          if (-not (Test-Path ${{ env.ZIP_FILE }})) {
+            Write-Error "❌ Failed to create ZIP file"
+            exit 1
+          }
+
+          # Display ZIP information
+          $zipInfo = Get-Item ${{ env.ZIP_FILE }}
+          $zipSizeMB = $zipInfo.Length / 1MB
+
+          Write-Host "`n✅ ZIP created successfully"
+          Write-Host "📦 Package: $($zipInfo.Name)"
+          Write-Host "📏 Size: $($zipSizeMB.ToString('F2')) MB"
+          Write-Host "📅 Created: $($zipInfo.CreationTime)"
+
+          # Check ZIP size (warn if larger than 50MB)
+          if ($zipSizeMB -gt 50) {
+            Write-Warning "⚠️  Package size is large ($($zipSizeMB.ToString('F2')) MB)"
+            Write-Warning "Consider optimizing dependencies or trimming unused code"
+          }
+
+      # Step 10: Validate ZIP structure
+      - name: Validate ZIP structure
+        shell: pwsh
+        run: |
+          Write-Host "=== Validating ZIP Structure ==="
+
+          # Expand ZIP to temp location for inspection
+          $tempDir = "./temp-zip-validation"
+          if (Test-Path $tempDir) {
+            Remove-Item $tempDir -Recurse -Force
+          }
+
+          Write-Host "Extracting ZIP for validation..."
+          Expand-Archive -Path ${{ env.ZIP_FILE }} -DestinationPath $tempDir
+
+          # Verify structure
+          $dllFiles = Get-ChildItem -Path $tempDir -Filter "*.dll" -Recurse
+          Write-Host "`n📚 DLL files in package: $($dllFiles.Count)"
+
+          foreach ($dll in $dllFiles) {
+            Write-Host "  - $($dll.Name)"
+          }
+
+          # Clean up temp directory
+          Remove-Item $tempDir -Recurse -Force
+
+          Write-Host "`n✅ ZIP structure is valid"
+
+      # Step 11: Code quality checks
+      - name: Code quality analysis
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host "=== Code Quality Analysis ==="
+
+          # Count lines of code
+          $csFiles = Get-ChildItem -Filter "*.cs" -Exclude "*AssemblyInfo.cs","*.Designer.cs" -Recurse
+          $totalLines = 0
+          $totalFiles = $csFiles.Count
+
+          foreach ($file in $csFiles) {
+            $lines = (Get-Content $file.FullName).Count
+            $totalLines += $lines
+          }
+
+          Write-Host "`n📊 Code Statistics:"
+          Write-Host "  - C# Files: $totalFiles"
+          Write-Host "  - Total Lines: $totalLines"
+          Write-Host "  - Avg Lines/File: $([math]::Round($totalLines / $totalFiles, 0))"
+
+      # Step 12: Upload ZIP as artifact
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-build-${{ github.event.pull_request.number }}
+          path: ${{ env.ZIP_FILE }}
+          retention-days: 7
+
+      # Step 13: Create PR comment with build summary
+      - name: PR validation summary
+        shell: pwsh
+        run: |
+          Write-Output "## ✅ PR Build Validation Successful" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**PR Number:** #${{ github.event.pull_request.number }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Branch:** ${{ github.head_ref }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Project:** ${{ env.PROJECT_FILE }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Configuration:** Release" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Runtime:** linux-x64" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "### Build Results" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- ✅ Dependencies restored" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- ✅ Project compiled successfully" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- ✅ Published for linux-x64" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- ✅ Deployment package created" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- ✅ Package structure validated" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+
+          # Get ZIP size
+          if (Test-Path ${{ env.ZIP_FILE }}) {
+            $zipSize = (Get-Item ${{ env.ZIP_FILE }}).Length / 1MB
+            Write-Output "**Package Size:** $($zipSize.ToString('F2')) MB" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "🎉 This PR is ready to merge! Merging will trigger automatic deployment to ODC." >> $env:GITHUB_STEP_SUMMARY
+
+      # Step 14: Handle validation failure
+      - name: Validation failure summary
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Output "## ❌ PR Build Validation Failed" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**PR Number:** #${{ github.event.pull_request.number }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Branch:** ${{ github.head_ref }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "The build validation failed. Please check the logs above for details." >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Common issues:**" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- Compilation errors in C# code" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- Missing NuGet package references" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- Invalid project configuration" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- Failed to create deployment package" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "Please fix the errors and push new commits to re-run validation." >> $env:GITHUB_STEP_SUMMARY

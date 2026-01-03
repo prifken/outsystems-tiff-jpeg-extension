@@ -1,0 +1,290 @@
+name: Deploy to OutSystems ODC
+
+# Trigger workflow on push to main branch or manual trigger
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: false
+        default: 'Development'
+        type: string
+
+# Define environment variables used across jobs
+env:
+  DOTNET_VERSION: '8.0.x'
+  PROJECT_FILE: 'ImageConverterLibrary.csproj'
+  ARTIFACT_NAME: 'ImageConverterLibrary'
+  ZIP_FILE: 'ImageConverterLibrary.zip'
+
+jobs:
+  # ============================================================================
+  # BUILD JOB - Compile and package the external logic library
+  # ============================================================================
+  build:
+    name: Build External Logic Library
+    runs-on: windows-latest
+
+    steps:
+      # Step 1: Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better context
+
+      # Step 2: Setup .NET SDK
+      - name: Setup .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Step 3: Display .NET version for debugging
+      - name: Display .NET version
+        run: dotnet --version
+
+      # Step 4: Restore NuGet dependencies
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_FILE }}
+
+      # Step 5: Build the project in Release configuration
+      - name: Build project
+        run: dotnet build ${{ env.PROJECT_FILE }} --configuration Release --no-restore
+
+      # Step 6: Publish the project for linux-x64 runtime (ODC Lambda target)
+      - name: Publish project
+        run: |
+          dotnet publish ${{ env.PROJECT_FILE }} `
+            --configuration Release `
+            --runtime linux-x64 `
+            --output ./publish `
+            --no-build
+
+      # Step 7: Create ZIP archive for ODC deployment
+      - name: Create deployment package
+        shell: pwsh
+        run: |
+          Write-Host "Creating ZIP archive from publish folder..."
+
+          # Remove existing ZIP if present
+          if (Test-Path ${{ env.ZIP_FILE }}) {
+            Remove-Item ${{ env.ZIP_FILE }} -Force
+            Write-Host "Removed existing ZIP file"
+          }
+
+          # Create new ZIP archive
+          Compress-Archive -Path ./publish/* -DestinationPath ${{ env.ZIP_FILE }} -Force
+
+          # Verify ZIP was created and show size
+          if (Test-Path ${{ env.ZIP_FILE }}) {
+            $zipSize = (Get-Item ${{ env.ZIP_FILE }}).Length / 1MB
+            Write-Host "✅ ZIP created successfully: ${{ env.ZIP_FILE }}"
+            Write-Host "📦 Package size: $($zipSize.ToString('F2')) MB"
+          } else {
+            Write-Error "❌ Failed to create ZIP file"
+            exit 1
+          }
+
+      # Step 8: Upload ZIP artifact for deployment job
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ZIP_FILE }}
+          retention-days: 30
+          if-no-files-found: error
+
+      # Step 9: Add build summary
+      - name: Build summary
+        shell: pwsh
+        run: |
+          Write-Output "## 🎉 Build Successful" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Project:** ${{ env.PROJECT_FILE }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Configuration:** Release" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Runtime:** linux-x64" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Package:** ${{ env.ZIP_FILE }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "✅ Ready for deployment to ODC" >> $env:GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # DEPLOY JOB - Upload library to OutSystems ODC
+  # ============================================================================
+  deploy:
+    name: Deploy to ODC Development
+    runs-on: windows-latest
+    needs: build
+    environment:
+      name: development
+      url: ${{ secrets.ODC_PORTAL_URL }}
+
+    steps:
+      # Step 1: Download the build artifact
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+
+      # Step 2: Verify artifact was downloaded
+      - name: Verify artifact
+        shell: pwsh
+        run: |
+          Write-Host "Verifying downloaded artifact..."
+
+          if (Test-Path ${{ env.ZIP_FILE }}) {
+            $zipSize = (Get-Item ${{ env.ZIP_FILE }}).Length / 1MB
+            Write-Host "✅ Artifact found: ${{ env.ZIP_FILE }}"
+            Write-Host "📦 Size: $($zipSize.ToString('F2')) MB"
+          } else {
+            Write-Error "❌ Artifact not found: ${{ env.ZIP_FILE }}"
+            exit 1
+          }
+
+      # Step 3: Obtain OAuth 2.0 access token from ODC
+      - name: Get ODC access token
+        id: auth
+        shell: pwsh
+        run: |
+          Write-Host "🔐 Authenticating with ODC..."
+
+          try {
+            # Prepare OAuth token request
+            $tokenUrl = "${{ secrets.ODC_PORTAL_URL }}/identity/connect/token"
+
+            # Build form data for client credentials grant
+            $body = @{
+              grant_type    = "client_credentials"
+              client_id     = "${{ secrets.ODC_CLIENT_ID }}"
+              client_secret = "${{ secrets.ODC_CLIENT_SECRET }}"
+            }
+
+            # Request access token
+            Write-Host "Requesting access token from: $tokenUrl"
+            $response = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+
+            # Extract access token
+            $accessToken = $response.access_token
+
+            if ([string]::IsNullOrEmpty($accessToken)) {
+              Write-Error "❌ Failed to obtain access token - empty response"
+              exit 1
+            }
+
+            Write-Host "✅ Access token obtained successfully"
+            Write-Host "Token type: $($response.token_type)"
+            Write-Host "Expires in: $($response.expires_in) seconds"
+
+            # Save token to output (masked in logs)
+            "ACCESS_TOKEN=$accessToken" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+            # Mask the token in logs
+            Write-Host "::add-mask::$accessToken"
+
+          } catch {
+            Write-Error "❌ Authentication failed: $($_.Exception.Message)"
+            Write-Host "Response: $($_.Exception.Response | ConvertTo-Json -Depth 3)"
+            exit 1
+          }
+
+      # Step 4: Upload library to ODC
+      - name: Upload library to ODC
+        shell: pwsh
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.ACCESS_TOKEN }}
+        run: |
+          Write-Host "🚀 Deploying to OutSystems ODC..."
+
+          try {
+            # Prepare upload request
+            $uploadUrl = "${{ secrets.ODC_PORTAL_URL }}/api/external-logic/v1/libraries"
+
+            # Read ZIP file as bytes
+            $zipPath = Resolve-Path ${{ env.ZIP_FILE }}
+            $zipBytes = [System.IO.File]::ReadAllBytes($zipPath)
+            $zipFileName = [System.IO.Path]::GetFileName($zipPath)
+
+            Write-Host "📦 Uploading: $zipFileName ($($zipBytes.Length / 1MB) MB)"
+            Write-Host "📍 Target: $uploadUrl"
+
+            # Create multipart/form-data boundary
+            $boundary = [System.Guid]::NewGuid().ToString()
+
+            # Build multipart form data
+            $LF = "`r`n"
+            $bodyLines = (
+              "--$boundary",
+              "Content-Disposition: form-data; name=`"file`"; filename=`"$zipFileName`"",
+              "Content-Type: application/zip$LF",
+              [System.Text.Encoding]::GetEncoding("iso-8859-1").GetString($zipBytes),
+              "--$boundary--$LF"
+            ) -join $LF
+
+            # Prepare headers
+            $headers = @{
+              Authorization  = "Bearer $env:ACCESS_TOKEN"
+              "Content-Type" = "multipart/form-data; boundary=$boundary"
+            }
+
+            # Upload library
+            Write-Host "Uploading library..."
+            $response = Invoke-RestMethod `
+              -Uri $uploadUrl `
+              -Method Post `
+              -Headers $headers `
+              -Body $bodyLines
+
+            # Check response
+            Write-Host "✅ Library uploaded successfully!"
+            Write-Host ""
+            Write-Host "Response:"
+            Write-Host ($response | ConvertTo-Json -Depth 5)
+
+            # Save deployment info for summary
+            if ($response.LibraryKey) {
+              "LIBRARY_KEY=$($response.LibraryKey)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            }
+
+          } catch {
+            Write-Error "❌ Deployment failed: $($_.Exception.Message)"
+
+            # Try to get detailed error response
+            if ($_.Exception.Response) {
+              $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+              $errorResponse = $reader.ReadToEnd()
+              Write-Host "Error details: $errorResponse"
+            }
+
+            exit 1
+          }
+
+      # Step 5: Add deployment summary
+      - name: Deployment summary
+        if: success()
+        shell: pwsh
+        run: |
+          Write-Output "## 🚀 Deployment Successful" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Library:** ${{ env.ARTIFACT_NAME }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Environment:** Development" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Portal:** ${{ secrets.ODC_PORTAL_URL }}" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Deployed:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "✅ External Logic library deployed to ODC Development environment" >> $env:GITHUB_STEP_SUMMARY
+
+      # Step 6: Handle deployment failure
+      - name: Deployment failure summary
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Output "## ❌ Deployment Failed" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "The deployment to ODC Development environment failed." >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "Please check the logs above for detailed error information." >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "**Common issues:**" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- Invalid credentials (check ODC_CLIENT_ID and ODC_CLIENT_SECRET)" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- Incorrect portal URL (check ODC_PORTAL_URL)" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- Network connectivity issues" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "- Invalid library package format" >> $env:GITHUB_STEP_SUMMARY
