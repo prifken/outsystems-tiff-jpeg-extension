@@ -147,7 +147,7 @@ public interface IImageConverter
     /// <summary>
     /// Converts TIFF file from S3 to PDF and saves back to S3
     /// Preserves all pages in multi-page TIFFs (unlike JPEG conversion)
-    /// Recommended for multi-page documents where all pages need to be preserved
+    /// NOTE: Output PDF is same size as input TIFF. For smaller files, use ConvertTiffToCompressedPdfS3.
     /// </summary>
     /// <param name="bucketName">S3 bucket name</param>
     /// <param name="inputS3Key">S3 key of input TIFF file</param>
@@ -157,7 +157,7 @@ public interface IImageConverter
     /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
     /// <returns>Conversion result with output S3 key in OutputPath field</returns>
     [OSAction(
-        Description = "Converts multi-page TIFF from S3 to PDF (preserves all pages)",
+        Description = "Converts multi-page TIFF from S3 to PDF (preserves all pages, maintains size)",
         ReturnName = "result",
         ReturnDescription = "Conversion result with output S3 key and page count",
         ReturnType = OSDataType.InferredFromDotNetType)]
@@ -191,6 +191,60 @@ public interface IImageConverter
             Description = "AWS Region (default: us-east-1)",
             DataType = OSDataType.Text)]
         string awsRegion = "us-east-1");
+
+    /// <summary>
+    /// Converts TIFF to compressed PDF optimized for OCR/LLM workflows
+    /// Compresses each page to JPEG then combines into PDF - typically 70-90% smaller
+    /// Ideal for document extraction, OCR, and LLM processing
+    /// </summary>
+    /// <param name="bucketName">S3 bucket name</param>
+    /// <param name="inputS3Key">S3 key of input TIFF file</param>
+    /// <param name="outputS3Key">S3 key for output compressed PDF file</param>
+    /// <param name="awsAccessKey">AWS Access Key ID</param>
+    /// <param name="awsSecretKey">AWS Secret Access Key</param>
+    /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
+    /// <param name="quality">JPEG quality for compression (1-100, default: 85 - higher = better quality, larger size)</param>
+    /// <returns>Conversion result with output S3 key and compression ratio</returns>
+    [OSAction(
+        Description = "Converts TIFF to compressed PDF optimized for OCR/LLM (70-90% smaller, preserves all pages)",
+        ReturnName = "result",
+        ReturnDescription = "Conversion result with compressed PDF, page count, and size reduction",
+        ReturnType = OSDataType.InferredFromDotNetType)]
+    ConversionResult ConvertTiffToCompressedPdfS3(
+        [OSParameter(
+            Description = "S3 bucket name",
+            DataType = OSDataType.Text)]
+        string bucketName,
+
+        [OSParameter(
+            Description = "S3 key of input TIFF file (e.g., 'uploads/document.tiff')",
+            DataType = OSDataType.Text)]
+        string inputS3Key,
+
+        [OSParameter(
+            Description = "S3 key for output PDF file (e.g., 'converted/document.pdf')",
+            DataType = OSDataType.Text)]
+        string outputS3Key,
+
+        [OSParameter(
+            Description = "AWS Access Key ID",
+            DataType = OSDataType.Text)]
+        string awsAccessKey,
+
+        [OSParameter(
+            Description = "AWS Secret Access Key",
+            DataType = OSDataType.Text)]
+        string awsSecretKey,
+
+        [OSParameter(
+            Description = "AWS Region (default: us-east-1)",
+            DataType = OSDataType.Text)]
+        string awsRegion = "us-east-1",
+
+        [OSParameter(
+            Description = "JPEG quality (1-100, default: 85). For OCR: 80-85 recommended. For archival: 90-95.",
+            DataType = OSDataType.Integer)]
+        int quality = 85);
 
     /// <summary>
     /// Generates a pre-signed S3 URL for direct browser upload
