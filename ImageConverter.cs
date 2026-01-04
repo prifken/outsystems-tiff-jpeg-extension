@@ -958,17 +958,18 @@ public class ImageConverter : IImageConverter
             log.AppendLine($"Page count: {magickImages.Count}");
 
             // Convert each page to JPEG with compression
-            log.AppendLine($"[STEP 5] Compressing pages to JPEG quality {quality}...");
+            log.AppendLine($"[STEP 5] Compressing {magickImages.Count} pages to JPEG quality {quality}...");
             var compressedPages = new MagickImageCollection();
             int pageNum = 0;
             long totalUncompressedSize = 0;
             long totalCompressedSize = 0;
 
+            // Only log details for small documents to avoid payload size issues
+            bool verboseLogging = magickImages.Count <= 5;
+
             foreach (var page in magickImages)
             {
                 pageNum++;
-                log.AppendLine($"  Processing page {pageNum}/{magickImages.Count}...");
-                log.AppendLine($"    Original format: {page.Format}, Size: {page.Width}x{page.Height}");
 
                 // Get uncompressed size estimate
                 using var uncompressedStream = new MemoryStream();
@@ -985,22 +986,23 @@ public class ImageConverter : IImageConverter
                 long compressedPageSize = jpegStream.Length;
                 totalCompressedSize += compressedPageSize;
 
-                log.AppendLine($"    Page size before: {uncompressedPageSize:N0} bytes");
-                log.AppendLine($"    Page size after: {compressedPageSize:N0} bytes (quality {quality})");
-                log.AppendLine($"    Page compression: {(1 - (double)compressedPageSize / uncompressedPageSize) * 100:F1}%");
+                // Only log per-page details for small documents
+                if (verboseLogging)
+                {
+                    log.AppendLine($"  Page {pageNum}: {uncompressedPageSize:N0} → {compressedPageSize:N0} bytes ({(1 - (double)compressedPageSize / uncompressedPageSize) * 100:F1}% reduction)");
+                }
 
                 // Load compressed JPEG back as image for PDF
                 jpegStream.Position = 0;
                 var compressedPage = new MagickImage(jpegStream);
                 compressedPages.Add(compressedPage);
-
-                log.AppendLine($"    ✓ Page {pageNum} compressed and added to collection");
             }
 
             log.AppendLine($"✓ All {compressedPages.Count} pages compressed");
-            log.AppendLine($"  Total uncompressed size: {totalUncompressedSize:N0} bytes ({totalUncompressedSize / 1024.0 / 1024.0:F2} MB)");
-            log.AppendLine($"  Total compressed size: {totalCompressedSize:N0} bytes ({totalCompressedSize / 1024.0 / 1024.0:F2} MB)");
-            log.AppendLine($"  Overall page compression: {(1 - (double)totalCompressedSize / totalUncompressedSize) * 100:F1}%");
+            log.AppendLine($"  Total pages processed: {compressedPages.Count}");
+            log.AppendLine($"  Total uncompressed: {totalUncompressedSize:N0} bytes ({totalUncompressedSize / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"  Total compressed: {totalCompressedSize:N0} bytes ({totalCompressedSize / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"  Overall compression: {(1 - (double)totalCompressedSize / totalUncompressedSize) * 100:F1}% size reduction");
             log.AppendLine();
 
             // Create PDF from compressed JPEG pages
