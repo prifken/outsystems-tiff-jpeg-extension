@@ -729,6 +729,159 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
+    /// Converts TIFF file from S3 to PDF and saves back to S3
+    /// Preserves all pages in multi-page TIFFs
+    /// </summary>
+    public ConversionResult ConvertTiffToPdfS3(
+        string bucketName,
+        string inputS3Key,
+        string outputS3Key,
+        string awsAccessKey,
+        string awsSecretKey,
+        string awsRegion = "us-east-1")
+    {
+        var log = new StringBuilder();
+        var startTime = DateTime.UtcNow;
+
+        try
+        {
+            log.AppendLine($"=== ConvertTiffToPdfS3 Execution Log ===");
+            log.AppendLine($"Start Time: {startTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Bucket: {bucketName}");
+            log.AppendLine($"Input S3 Key: {inputS3Key}");
+            log.AppendLine($"Output S3 Key: {outputS3Key}");
+            log.AppendLine($"Region: {awsRegion}");
+            log.AppendLine();
+
+            // Validate inputs
+            log.AppendLine("[STEP 1] Validating inputs...");
+            if (string.IsNullOrWhiteSpace(bucketName))
+                return new ConversionResult { Success = false, Message = "Bucket name cannot be empty", DetailedLog = log.ToString() };
+
+            if (string.IsNullOrWhiteSpace(inputS3Key))
+                return new ConversionResult { Success = false, Message = "Input S3 key cannot be empty", DetailedLog = log.ToString() };
+
+            if (string.IsNullOrWhiteSpace(outputS3Key))
+                return new ConversionResult { Success = false, Message = "Output S3 key cannot be empty", DetailedLog = log.ToString() };
+
+            log.AppendLine("✓ All inputs valid");
+            log.AppendLine();
+
+            // Create AWS credentials and S3 client
+            log.AppendLine("[STEP 2] Creating AWS S3 client...");
+            var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
+            var regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
+            using var s3Client = new AmazonS3Client(credentials, regionEndpoint);
+            log.AppendLine($"✓ S3 client created for region: {awsRegion}");
+            log.AppendLine();
+
+            // Download TIFF from S3
+            log.AppendLine("[STEP 3] Downloading TIFF from S3...");
+            var getRequest = new GetObjectRequest
+            {
+                BucketName = bucketName,
+                Key = inputS3Key
+            };
+
+            using var getResponse = s3Client.GetObjectAsync(getRequest).GetAwaiter().GetResult();
+            log.AppendLine($"Download successful");
+            log.AppendLine($"Content-Type: {getResponse.Headers.ContentType}");
+            log.AppendLine($"Content-Length: {getResponse.ContentLength:N0} bytes ({getResponse.ContentLength / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine();
+
+            // Load TIFF and convert to PDF using ImageMagick
+            log.AppendLine("[STEP 4] Loading TIFF and converting to PDF...");
+            using var memoryStream = new MemoryStream();
+            getResponse.ResponseStream.CopyTo(memoryStream);
+            memoryStream.Position = 0;
+
+            // Use ImageMagick for TIFF to PDF conversion (handles multi-page)
+            using var magickImageCollection = new MagickImageCollection(memoryStream);
+            log.AppendLine($"TIFF loaded successfully");
+            log.AppendLine($"Page count: {magickImageCollection.Count}");
+
+            // Convert all pages to PDF
+            log.AppendLine("[STEP 5] Converting to PDF format...");
+            using var pdfStream = new MemoryStream();
+            magickImageCollection.Write(pdfStream, MagickFormat.Pdf);
+            pdfStream.Position = 0;
+
+            log.AppendLine($"Conversion complete");
+            log.AppendLine($"PDF size: {pdfStream.Length:N0} bytes ({pdfStream.Length / 1024.0:F2} KB)");
+            log.AppendLine($"Pages converted: {magickImageCollection.Count}");
+            log.AppendLine($"Compression ratio: {(double)getResponse.ContentLength / pdfStream.Length:F2}x");
+            log.AppendLine();
+
+            // Upload PDF to S3
+            log.AppendLine("[STEP 6] Uploading PDF to S3...");
+            var putRequest = new PutObjectRequest
+            {
+                BucketName = bucketName,
+                Key = outputS3Key,
+                InputStream = pdfStream,
+                ContentType = "application/pdf"
+            };
+
+            var putResponse = s3Client.PutObjectAsync(putRequest).GetAwaiter().GetResult();
+            log.AppendLine($"Upload successful");
+            log.AppendLine($"Output S3 Key: {outputS3Key}");
+            log.AppendLine($"ETag: {putResponse.ETag}");
+            log.AppendLine();
+
+            var endTime = DateTime.UtcNow;
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: SUCCESS");
+
+            return new ConversionResult
+            {
+                Success = true,
+                Message = $"Successfully converted {magickImageCollection.Count}-page TIFF to PDF via S3. Output: s3://{bucketName}/{outputS3Key}",
+                OutputPath = outputS3Key,
+                PagesConverted = magickImageCollection.Count,
+                DetailedLog = log.ToString()
+            };
+        }
+        catch (AmazonS3Exception s3Ex)
+        {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine("=== EXCEPTION: AmazonS3Exception ===");
+            log.AppendLine($"Message: {s3Ex.Message}");
+            log.AppendLine($"Error Code: {s3Ex.ErrorCode}");
+            log.AppendLine($"Status Code: {s3Ex.StatusCode}");
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
+                OutputPath = string.Empty,
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
+            };
+        }
+        catch (Exception ex)
+        {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine($"=== EXCEPTION: {ex.GetType().Name} ===");
+            log.AppendLine($"Message: {ex.Message}");
+            log.AppendLine($"Stack Trace: {ex.StackTrace}");
+            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"Conversion error: {ex.Message}",
+                OutputPath = string.Empty,
+                PagesConverted = 0,
+                DetailedLog = log.ToString()
+            };
+        }
+    }
+
+    /// <summary>
     /// Generates a pre-signed S3 URL for direct browser upload
     /// Bypasses OutSystems 5.5MB payload limit by allowing direct browser to S3 upload
     /// </summary>

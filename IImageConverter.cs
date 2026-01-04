@@ -145,6 +145,54 @@ public interface IImageConverter
         int quality = 85);
 
     /// <summary>
+    /// Converts TIFF file from S3 to PDF and saves back to S3
+    /// Preserves all pages in multi-page TIFFs (unlike JPEG conversion)
+    /// Recommended for multi-page documents where all pages need to be preserved
+    /// </summary>
+    /// <param name="bucketName">S3 bucket name</param>
+    /// <param name="inputS3Key">S3 key of input TIFF file</param>
+    /// <param name="outputS3Key">S3 key for output PDF file</param>
+    /// <param name="awsAccessKey">AWS Access Key ID</param>
+    /// <param name="awsSecretKey">AWS Secret Access Key</param>
+    /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
+    /// <returns>Conversion result with output S3 key in OutputPath field</returns>
+    [OSAction(
+        Description = "Converts multi-page TIFF from S3 to PDF (preserves all pages)",
+        ReturnName = "result",
+        ReturnDescription = "Conversion result with output S3 key and page count",
+        ReturnType = OSDataType.InferredFromDotNetType)]
+    ConversionResult ConvertTiffToPdfS3(
+        [OSParameter(
+            Description = "S3 bucket name",
+            DataType = OSDataType.Text)]
+        string bucketName,
+
+        [OSParameter(
+            Description = "S3 key of input TIFF file (e.g., 'uploads/document.tiff')",
+            DataType = OSDataType.Text)]
+        string inputS3Key,
+
+        [OSParameter(
+            Description = "S3 key for output PDF file (e.g., 'converted/document.pdf')",
+            DataType = OSDataType.Text)]
+        string outputS3Key,
+
+        [OSParameter(
+            Description = "AWS Access Key ID",
+            DataType = OSDataType.Text)]
+        string awsAccessKey,
+
+        [OSParameter(
+            Description = "AWS Secret Access Key",
+            DataType = OSDataType.Text)]
+        string awsSecretKey,
+
+        [OSParameter(
+            Description = "AWS Region (default: us-east-1)",
+            DataType = OSDataType.Text)]
+        string awsRegion = "us-east-1");
+
+    /// <summary>
     /// Generates a pre-signed S3 URL for direct browser upload
     /// Allows large file uploads without going through OutSystems server
     /// </summary>
