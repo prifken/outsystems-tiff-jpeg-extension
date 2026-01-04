@@ -961,6 +961,8 @@ public class ImageConverter : IImageConverter
             log.AppendLine($"[STEP 5] Compressing pages to JPEG quality {quality}...");
             var compressedPages = new MagickImageCollection();
             int pageNum = 0;
+            long totalUncompressedSize = 0;
+            long totalCompressedSize = 0;
 
             foreach (var page in magickImages)
             {
@@ -968,14 +970,37 @@ public class ImageConverter : IImageConverter
                 log.AppendLine($"  Processing page {pageNum}/{magickImages.Count}...");
                 log.AppendLine($"    Original format: {page.Format}, Size: {page.Width}x{page.Height}");
 
+                // Get uncompressed size estimate
+                using var uncompressedStream = new MemoryStream();
+                page.Write(uncompressedStream);
+                long uncompressedPageSize = uncompressedStream.Length;
+                totalUncompressedSize += uncompressedPageSize;
+
+                // Convert page to JPEG with compression
+                using var jpegStream = new MemoryStream();
                 page.Format = MagickFormat.Jpeg;
                 page.Quality = (uint)quality;
-                compressedPages.Add(page);
+                page.Write(jpegStream, MagickFormat.Jpeg);
 
-                log.AppendLine($"    ✓ Page {pageNum} compressed to JPEG quality {quality}");
+                long compressedPageSize = jpegStream.Length;
+                totalCompressedSize += compressedPageSize;
+
+                log.AppendLine($"    Page size before: {uncompressedPageSize:N0} bytes");
+                log.AppendLine($"    Page size after: {compressedPageSize:N0} bytes (quality {quality})");
+                log.AppendLine($"    Page compression: {(1 - (double)compressedPageSize / uncompressedPageSize) * 100:F1}%");
+
+                // Load compressed JPEG back as image for PDF
+                jpegStream.Position = 0;
+                var compressedPage = new MagickImage(jpegStream);
+                compressedPages.Add(compressedPage);
+
+                log.AppendLine($"    ✓ Page {pageNum} compressed and added to collection");
             }
 
             log.AppendLine($"✓ All {compressedPages.Count} pages compressed");
+            log.AppendLine($"  Total uncompressed size: {totalUncompressedSize:N0} bytes ({totalUncompressedSize / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"  Total compressed size: {totalCompressedSize:N0} bytes ({totalCompressedSize / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"  Overall page compression: {(1 - (double)totalCompressedSize / totalUncompressedSize) * 100:F1}%");
             log.AppendLine();
 
             // Create PDF from compressed JPEG pages
