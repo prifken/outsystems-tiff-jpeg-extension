@@ -960,12 +960,19 @@ public class ImageConverter : IImageConverter
             // Convert each page to JPEG with compression
             log.AppendLine($"[STEP 5] Compressing pages to JPEG quality {quality}...");
             var compressedPages = new MagickImageCollection();
+            int pageNum = 0;
 
             foreach (var page in magickImages)
             {
+                pageNum++;
+                log.AppendLine($"  Processing page {pageNum}/{magickImages.Count}...");
+                log.AppendLine($"    Original format: {page.Format}, Size: {page.Width}x{page.Height}");
+
                 page.Format = MagickFormat.Jpeg;
                 page.Quality = (uint)quality;
                 compressedPages.Add(page);
+
+                log.AppendLine($"    ✓ Page {pageNum} compressed to JPEG quality {quality}");
             }
 
             log.AppendLine($"✓ All {compressedPages.Count} pages compressed");
@@ -973,19 +980,42 @@ public class ImageConverter : IImageConverter
 
             // Create PDF from compressed JPEG pages
             log.AppendLine("[STEP 6] Creating compressed PDF...");
+            log.AppendLine($"Writing {compressedPages.Count} compressed pages to PDF format...");
+
             using var pdfStream = new MemoryStream();
             compressedPages.Write(pdfStream, MagickFormat.Pdf);
             pdfStream.Position = 0;
 
-            log.AppendLine($"PDF created");
-            log.AppendLine($"Original size: {getResponse.ContentLength:N0} bytes ({getResponse.ContentLength / 1024.0 / 1024.0:F2} MB)");
-            log.AppendLine($"Compressed size: {pdfStream.Length:N0} bytes ({pdfStream.Length / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"✓ PDF stream created");
+            log.AppendLine($"  Stream length: {pdfStream.Length:N0} bytes");
+            log.AppendLine($"  Stream position: {pdfStream.Position}");
+            log.AppendLine($"  Stream can read: {pdfStream.CanRead}");
+            log.AppendLine($"  Stream can seek: {pdfStream.CanSeek}");
+
+            if (pdfStream.Length == 0)
+            {
+                log.AppendLine("ERROR: PDF stream is empty!");
+                return new ConversionResult
+                {
+                    Success = false,
+                    Message = "PDF creation failed - stream is empty",
+                    DetailedLog = log.ToString()
+                };
+            }
+
+            log.AppendLine($"Original TIFF size: {getResponse.ContentLength:N0} bytes ({getResponse.ContentLength / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"Compressed PDF size: {pdfStream.Length:N0} bytes ({pdfStream.Length / 1024.0 / 1024.0:F2} MB)");
             log.AppendLine($"Size reduction: {(1 - (double)pdfStream.Length / getResponse.ContentLength) * 100:F1}%");
             log.AppendLine($"Compression ratio: {(double)getResponse.ContentLength / pdfStream.Length:F2}x");
             log.AppendLine();
 
             // Upload compressed PDF to S3
             log.AppendLine("[STEP 7] Uploading compressed PDF to S3...");
+            log.AppendLine($"  Target bucket: {bucketName}");
+            log.AppendLine($"  Target key: {outputS3Key}");
+            log.AppendLine($"  Content type: application/pdf");
+            log.AppendLine($"  Stream size: {pdfStream.Length:N0} bytes");
+
             var putRequest = new PutObjectRequest
             {
                 BucketName = bucketName,
@@ -994,10 +1024,14 @@ public class ImageConverter : IImageConverter
                 ContentType = "application/pdf"
             };
 
+            log.AppendLine("  Initiating S3 PutObject request...");
             var putResponse = s3Client.PutObjectAsync(putRequest).GetAwaiter().GetResult();
-            log.AppendLine($"Upload successful");
-            log.AppendLine($"Output S3 Key: {outputS3Key}");
-            log.AppendLine($"ETag: {putResponse.ETag}");
+
+            log.AppendLine($"✓ S3 upload completed");
+            log.AppendLine($"  Output S3 Key: {outputS3Key}");
+            log.AppendLine($"  ETag: {putResponse.ETag}");
+            log.AppendLine($"  HTTP Status: {putResponse.HttpStatusCode}");
+            log.AppendLine($"  Request ID: {putResponse.ResponseMetadata.RequestId}");
             log.AppendLine();
 
             var endTime = DateTime.UtcNow;
