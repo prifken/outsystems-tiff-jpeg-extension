@@ -993,8 +993,9 @@ public class ImageConverter : IImageConverter
                 }
 
                 // Load compressed JPEG back as image for PDF
-                jpegStream.Position = 0;
-                var compressedPage = new MagickImage(jpegStream);
+                // Use byte array to avoid "Cannot access a closed Stream" error
+                var jpegBytes = jpegStream.ToArray();
+                var compressedPage = new MagickImage(jpegBytes);
                 compressedPages.Add(compressedPage);
             }
 
