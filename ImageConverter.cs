@@ -687,9 +687,15 @@ public class ImageConverter : IImageConverter
             log.AppendLine();
 
             var endTime = DateTime.UtcNow;
-            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
-            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
-            log.AppendLine($"Status: SUCCESS");
+
+            // Minimal log for success to avoid payload size errors
+            var successLog = new StringBuilder();
+            successLog.AppendLine("=== Conversion Summary ===");
+            successLog.AppendLine($"Status: SUCCESS");
+            successLog.AppendLine($"Format: JPEG (first page only)");
+            successLog.AppendLine($"Quality: {quality}");
+            successLog.AppendLine($"Duration: {(endTime - startTime).TotalSeconds:F1} seconds");
+            successLog.AppendLine($"Output S3 Key: {outputS3Key}");
 
             return new ConversionResult
             {
@@ -697,7 +703,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Successfully converted TIFF to JPEG via S3 (quality: {quality}). Output: s3://{bucketName}/{outputS3Key}",
                 OutputPath = outputS3Key,
                 PagesConverted = 1,
-                DetailedLog = log.ToString()
+                DetailedLog = successLog.ToString()
             };
         }
         catch (AmazonS3Exception s3Ex)
@@ -871,9 +877,15 @@ public class ImageConverter : IImageConverter
             log.AppendLine();
 
             var endTime = DateTime.UtcNow;
-            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
-            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
-            log.AppendLine($"Status: SUCCESS");
+
+            // Minimal log for success to avoid payload size errors
+            var successLog = new StringBuilder();
+            successLog.AppendLine("=== Conversion Summary ===");
+            successLog.AppendLine($"Status: SUCCESS");
+            successLog.AppendLine($"Format: PDF (uncompressed)");
+            successLog.AppendLine($"Pages: {magickImageCollection.Count}");
+            successLog.AppendLine($"Duration: {(endTime - startTime).TotalSeconds:F1} seconds");
+            successLog.AppendLine($"Output S3 Key: {outputS3Key}");
 
             return new ConversionResult
             {
@@ -881,7 +893,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Successfully converted {magickImageCollection.Count}-page TIFF to PDF via S3. Output: s3://{bucketName}/{outputS3Key}",
                 OutputPath = outputS3Key,
                 PagesConverted = magickImageCollection.Count,
-                DetailedLog = log.ToString()
+                DetailedLog = successLog.ToString()
             };
         }
         catch (AmazonS3Exception s3Ex)
@@ -1115,11 +1127,20 @@ public class ImageConverter : IImageConverter
             log.AppendLine();
 
             var endTime = DateTime.UtcNow;
-            log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
-            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
-            log.AppendLine($"Status: SUCCESS");
-
             var sizeReduction = (1 - (double)pdfStream.Length / getResponse.ContentLength) * 100;
+
+            // For successful conversions, return minimal log to avoid 5.5MB payload limit
+            // Only include detailed logs on failure for debugging
+            var successLog = new StringBuilder();
+            successLog.AppendLine("=== Conversion Summary ===");
+            successLog.AppendLine($"Status: SUCCESS");
+            successLog.AppendLine($"Input: {getResponse.ContentLength / 1024.0 / 1024.0:F2} MB");
+            successLog.AppendLine($"Output: {pdfStream.Length / 1024.0 / 1024.0:F2} MB");
+            successLog.AppendLine($"Pages: {magickImages.Count}");
+            successLog.AppendLine($"Quality: {quality}");
+            successLog.AppendLine($"Size Reduction: {sizeReduction:F1}%");
+            successLog.AppendLine($"Duration: {(endTime - startTime).TotalSeconds:F1} seconds");
+            successLog.AppendLine($"Output S3 Key: {outputS3Key}");
 
             return new ConversionResult
             {
@@ -1127,7 +1148,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Successfully converted {magickImages.Count}-page TIFF to compressed PDF ({sizeReduction:F1}% smaller). Quality: {quality}. Output: s3://{bucketName}/{outputS3Key}",
                 OutputPath = outputS3Key,
                 PagesConverted = magickImages.Count,
-                DetailedLog = log.ToString()
+                DetailedLog = successLog.ToString()  // Minimal log for success to avoid payload size errors
             };
         }
         catch (AmazonS3Exception s3Ex)
