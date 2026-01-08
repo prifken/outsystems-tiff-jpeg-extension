@@ -1269,7 +1269,7 @@ public class ImageConverter : IImageConverter
     /// Generates a pre-signed S3 URL for downloading files
     /// Use this to download large files (>5.5MB) directly from S3 to the browser
     /// </summary>
-    public S3UploadUrlResult GenerateS3DownloadUrl(
+    public S3DownloadUrlResult GenerateS3DownloadUrl(
         string bucketName,
         string s3Key,
         string awsAccessKey,
@@ -1281,16 +1281,16 @@ public class ImageConverter : IImageConverter
         {
             // Validate inputs
             if (string.IsNullOrWhiteSpace(bucketName))
-                return new S3UploadUrlResult { Success = false, Message = "Bucket name cannot be empty" };
+                return new S3DownloadUrlResult { Success = false, Message = "Bucket name cannot be empty" };
 
             if (string.IsNullOrWhiteSpace(s3Key))
-                return new S3UploadUrlResult { Success = false, Message = "S3 key cannot be empty" };
+                return new S3DownloadUrlResult { Success = false, Message = "S3 key cannot be empty" };
 
             if (string.IsNullOrWhiteSpace(awsAccessKey) || string.IsNullOrWhiteSpace(awsSecretKey))
-                return new S3UploadUrlResult { Success = false, Message = "AWS credentials cannot be empty" };
+                return new S3DownloadUrlResult { Success = false, Message = "AWS credentials cannot be empty" };
 
             if (expirationMinutes < 1 || expirationMinutes > 10080) // Max 7 days
-                return new S3UploadUrlResult { Success = false, Message = "Expiration must be between 1 and 10080 minutes (7 days)" };
+                return new S3DownloadUrlResult { Success = false, Message = "Expiration must be between 1 and 10080 minutes (7 days)" };
 
             // Create AWS credentials and S3 client
             var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
@@ -1310,33 +1310,33 @@ public class ImageConverter : IImageConverter
 
             string downloadUrl = s3Client.GetPreSignedURL(request);
 
-            return new S3UploadUrlResult
+            return new S3DownloadUrlResult
             {
                 Success = true,
                 Message = $"Pre-signed download URL generated successfully. Expires in {expirationMinutes} minutes.",
-                UploadUrl = downloadUrl,  // Reusing this field for download URL
+                DownloadUrl = downloadUrl,
                 S3Key = s3Key,
                 ExpiresAt = expiresAt.ToString("yyyy-MM-dd HH:mm:ss UTC")
             };
         }
         catch (AmazonS3Exception s3Ex)
         {
-            return new S3UploadUrlResult
+            return new S3DownloadUrlResult
             {
                 Success = false,
                 Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
-                UploadUrl = string.Empty,
+                DownloadUrl = string.Empty,
                 S3Key = s3Key,
                 ExpiresAt = string.Empty
             };
         }
         catch (Exception ex)
         {
-            return new S3UploadUrlResult
+            return new S3DownloadUrlResult
             {
                 Success = false,
                 Message = $"Error generating download URL: {ex.Message}",
-                UploadUrl = string.Empty,
+                DownloadUrl = string.Empty,
                 S3Key = s3Key,
                 ExpiresAt = string.Empty
             };

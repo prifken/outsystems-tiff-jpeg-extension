@@ -216,7 +216,7 @@ public interface IImageConverter
         ReturnName = "result",
         ReturnDescription = "Pre-signed URL result with download URL and expiration",
         ReturnType = OSDataType.InferredFromDotNetType)]
-    S3UploadUrlResult GenerateS3DownloadUrl(
+    S3DownloadUrlResult GenerateS3DownloadUrl(
         [OSParameter(
             Description = "S3 bucket name",
             DataType = OSDataType.Text)]

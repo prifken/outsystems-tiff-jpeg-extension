@@ -139,6 +139,43 @@ public struct S3UploadUrlResult
 }
 
 /// <summary>
+/// Result structure for S3 pre-signed download URL generation
+/// </summary>
+[OSStructure(Description = "Pre-signed S3 download URL for direct browser downloads")]
+public struct S3DownloadUrlResult
+{
+    [OSStructureField(
+        Description = "Indicates if URL generation was successful",
+        DataType = OSDataType.Boolean,
+        IsMandatory = true)]
+    public bool Success;
+
+    [OSStructureField(
+        Description = "Status message or error details",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string Message;
+
+    [OSStructureField(
+        Description = "Pre-signed URL for downloading (GET request)",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string DownloadUrl;
+
+    [OSStructureField(
+        Description = "S3 key of file being downloaded",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string S3Key;
+
+    [OSStructureField(
+        Description = "URL expiration time (UTC)",
+        DataType = OSDataType.Text,
+        IsMandatory = false)]
+    public string ExpiresAt;
+}
+
+/// <summary>
 /// Result structure for S3 file download operations
 /// </summary>
 [OSStructure(Description = "Result from downloading a file from S3")]
