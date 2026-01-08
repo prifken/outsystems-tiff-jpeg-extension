@@ -8,7 +8,7 @@ namespace ImageConverterLibrary;
 /// </summary>
 [OSInterface(
     Name = "TiffConverter",
-    Description = "Convert TIFF files to PDF or JPEG format. Uses AWS S3 for storage to handle large files.",
+    Description = "Convert TIFF files to PDF/JPEG with 70-90% compression. Optimized for AI/LLM document processing (Claude, GPT-4). Uses AWS S3 for large files.",
     IconResourceName = "ImageConverterLibrary.icon.png")]
 public interface IImageConverter
 {

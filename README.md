@@ -8,9 +8,10 @@ TiffConverter is an External Logic library that enables TIFF image conversion in
 
 ## Key Features
 
+- **AI/LLM-optimized**: Compress TIFFs by 70-90% to fit within AI API limits (Claude, GPT-4, Azure Document Intelligence)
 - **Multi-format conversion**: Convert TIFF to PDF (multi-page) or JPEG (first page)
-- **Intelligent compression**: PDF compression reduces file size by 70-90% while maintaining quality for OCR/LLM workflows
-- **Large file support**: Handle files of any size using S3 pre-signed URLs
+- **Intelligent compression**: Maintains OCR-readable quality while dramatically reducing file size and token costs
+- **Large file support**: Handle files of any size using S3 pre-signed URLs (bypass ODC's 5.5MB limit)
 - **Quality control**: Adjustable quality settings (1-100) for both PDF and JPEG output
 - **Multi-page support**: Preserve all pages when converting to PDF
 - **S3 integration**: Direct upload/download URLs for browser-based file handling
@@ -131,6 +132,41 @@ Download small files (<5.5MB) directly as binary data.
 **Note:** For files larger than 5.5MB, use GenerateS3DownloadUrl instead.
 
 ## Common Use Cases
+
+### AI/LLM Document Processing (Primary Use Case)
+
+Process large scanned documents with AI services like Claude, GPT-4, or Azure Document Intelligence:
+
+**The Challenge:**
+- AI APIs have strict file size limits (typically 5-32MB)
+- Large TIFFs (100-500MB) exceed these limits
+- API costs scale with file size and tokens processed
+- Many AI services require PDF format for optimal OCR
+
+**The Solution:**
+1. Upload large TIFF scans to S3 (bypassing ODC's 5.5MB limit)
+2. Convert to compressed PDF with quality=80-85
+   - **Result**: 70-90% smaller files that fit within AI API limits
+   - Maintains OCR-readable quality
+   - Reduces token count and API costs
+3. Send compressed PDF to AI service (Claude, OpenAI, etc.)
+4. Process AI-extracted data in your OutSystems app
+
+**Benefits:**
+- ✅ Convert 200MB TIFFs into 20-30MB PDFs (within API limits)
+- ✅ Reduce AI processing costs by 70-90%
+- ✅ Faster API responses due to smaller files
+- ✅ Optimized for document intelligence workflows
+
+**Example AI Workflow:**
+```
+1. Scan paper documents → large multi-page TIFFs (100-300MB)
+2. Upload to S3 via TiffConverter.GenerateS3UploadUrl()
+3. Convert to compressed PDF via TiffConverter.ConvertTiffS3(quality: 80, compressPdf: true)
+4. Download compressed PDF (now 15-40MB)
+5. Send to Claude/GPT-4 for extraction (invoices, contracts, forms)
+6. Process structured data in OutSystems application
+```
 
 ### Document Scanning Workflow
 
