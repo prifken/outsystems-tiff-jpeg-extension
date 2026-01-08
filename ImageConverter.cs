@@ -977,15 +977,25 @@ public class ImageConverter : IImageConverter
 
             // Download TIFF from S3
             log.AppendLine("[STEP 3] Downloading TIFF from S3...");
+            log.AppendLine($"  S3 endpoint: {s3Client.Config.ServiceURL ?? s3Client.Config.RegionEndpoint?.DisplayName ?? "default"}");
+            log.AppendLine($"  Request timeout: {s3Client.Config.Timeout?.TotalSeconds ?? 0} seconds");
+            log.AppendLine($"  Max error retry: {s3Client.Config.MaxErrorRetry}");
+
+            var downloadStartTime = DateTime.UtcNow;
             var getRequest = new GetObjectRequest
             {
                 BucketName = bucketName,
                 Key = inputS3Key
             };
 
+            log.AppendLine($"  Initiating GetObject request at {downloadStartTime:HH:mm:ss.fff}...");
             using var getResponse = s3Client.GetObjectAsync(getRequest).GetAwaiter().GetResult();
-            log.AppendLine($"Download successful");
-            log.AppendLine($"Content-Length: {getResponse.ContentLength:N0} bytes ({getResponse.ContentLength / 1024.0 / 1024.0:F2} MB)");
+            var downloadEndTime = DateTime.UtcNow;
+
+            log.AppendLine($"✓ Download successful");
+            log.AppendLine($"  Download duration: {(downloadEndTime - downloadStartTime).TotalSeconds:F2} seconds");
+            log.AppendLine($"  Content-Length: {getResponse.ContentLength:N0} bytes ({getResponse.ContentLength / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"  Download speed: {(getResponse.ContentLength / 1024.0 / 1024.0) / (downloadEndTime - downloadStartTime).TotalSeconds:F2} MB/s");
             log.AppendLine();
 
             // Load TIFF
@@ -1127,7 +1137,24 @@ public class ImageConverter : IImageConverter
             log.AppendLine("=== EXCEPTION: AmazonS3Exception ===");
             log.AppendLine($"Message: {s3Ex.Message}");
             log.AppendLine($"Error Code: {s3Ex.ErrorCode}");
+            log.AppendLine($"Status Code: {s3Ex.StatusCode}");
+            log.AppendLine($"Request ID: {s3Ex.RequestId}");
+            log.AppendLine($"Exception Type: {s3Ex.GetType().FullName}");
+
+            if (s3Ex.InnerException != null)
+            {
+                log.AppendLine($"Inner Exception Type: {s3Ex.InnerException.GetType().FullName}");
+                log.AppendLine($"Inner Exception Message: {s3Ex.InnerException.Message}");
+                if (s3Ex.InnerException.InnerException != null)
+                {
+                    log.AppendLine($"Inner-Inner Exception Type: {s3Ex.InnerException.InnerException.GetType().FullName}");
+                    log.AppendLine($"Inner-Inner Exception Message: {s3Ex.InnerException.InnerException.Message}");
+                }
+            }
+
+            log.AppendLine($"Stack Trace: {s3Ex.StackTrace}");
             log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Duration before failure: {(endTime - startTime).TotalSeconds:F2} seconds");
 
             return new ConversionResult
             {
@@ -1142,10 +1169,23 @@ public class ImageConverter : IImageConverter
         {
             var endTime = DateTime.UtcNow;
             log.AppendLine();
-            log.AppendLine($"=== EXCEPTION: {ex.GetType().Name} ===");
+            log.AppendLine($"=== EXCEPTION: {ex.GetType().FullName} ===");
             log.AppendLine($"Message: {ex.Message}");
+
+            if (ex.InnerException != null)
+            {
+                log.AppendLine($"Inner Exception Type: {ex.InnerException.GetType().FullName}");
+                log.AppendLine($"Inner Exception Message: {ex.InnerException.Message}");
+                if (ex.InnerException.InnerException != null)
+                {
+                    log.AppendLine($"Inner-Inner Exception Type: {ex.InnerException.InnerException.GetType().FullName}");
+                    log.AppendLine($"Inner-Inner Exception Message: {ex.InnerException.InnerException.Message}");
+                }
+            }
+
             log.AppendLine($"Stack Trace: {ex.StackTrace}");
             log.AppendLine($"End Time: {endTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Duration before failure: {(endTime - startTime).TotalSeconds:F2} seconds");
 
             return new ConversionResult
             {
