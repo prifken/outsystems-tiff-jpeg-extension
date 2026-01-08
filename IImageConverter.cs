@@ -63,7 +63,7 @@ public interface IImageConverter
         string awsRegion = "us-east-1",
 
         [OSParameter(
-            Description = "Output format: 'PDF' for multi-page documents or 'JPEG' for single page images",
+            Description = "Output format (case-insensitive). Accepted values: 'PDF' = multi-page document, 'JPEG' = first page only. Default: 'PDF'",
             DataType = OSDataType.Text)]
         string outputFormat = "PDF",
 
