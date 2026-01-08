@@ -9,7 +9,7 @@ namespace ImageConverterLibrary;
 [OSInterface(
     Name = "ImageConverter",
     Description = "TIFF to PDF/JPEG converter with AWS S3 integration - handles large files via S3",
-    IconResourceName = "icon.png")]
+    IconResourceName = "ImageConverterLibrary.icon.png")]
 public interface IImageConverter
 {
     /// <summary>
