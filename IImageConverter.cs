@@ -7,8 +7,8 @@ namespace ImageConverterLibrary;
 /// This interface is exposed to OutSystems ODC as an External Logic library
 /// </summary>
 [OSInterface(
-    Name = "TiffConverterS3",
-    Description = "TIFF to PDF/JPEG converter with AWS S3 integration - handles large files via S3",
+    Name = "TiffConverter",
+    Description = "Convert TIFF files to PDF or JPEG format. Uses AWS S3 for storage to handle large files.",
     IconResourceName = "ImageConverterLibrary.icon.png")]
 public interface IImageConverter
 {
