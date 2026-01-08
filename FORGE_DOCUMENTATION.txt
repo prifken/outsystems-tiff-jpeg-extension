@@ -1,0 +1,192 @@
+# ImageConverter - TIFF to PDF/JPEG Converter with AI/LLM Optimization
+
+Convert TIFF files to compressed PDF or JPEG format using AWS S3. Optimized for AI document processing workflows (Claude, GPT-4, Azure Document Intelligence).
+
+## Key Features
+
+• AI/LLM-optimized: Compress TIFFs by 70-90% to fit within AI API limits
+• Multi-format conversion: TIFF to PDF (multi-page) or JPEG (first page)
+• Large file support: Handle files of any size using S3 (bypass ODC's 5.5MB limit)
+• Quality control: Adjustable settings (1-100) for PDF and JPEG output
+• S3 integration: Direct upload/download URLs for browser-based file handling
+
+## Installation
+
+1. Install library from Forge in ODC Portal
+2. Add library dependency to your ODC application
+3. Configure AWS credentials in application settings
+
+## AWS Setup
+
+Requirements:
+• AWS Account with S3 access
+• S3 Bucket for file storage
+• Access Key and Secret Key with S3 permissions (s3:PutObject, s3:GetObject, s3:ListBucket)
+
+IMPORTANT: Configure CORS on your S3 bucket to allow browser uploads/downloads:
+• Allowed origins: Your ODC application domain
+• Allowed methods: GET, PUT
+• Allowed headers: *
+
+## Configuration in ODC
+
+Store Credentials
+Configuration --> Settings, set:
+• AWS_AccessKey
+• AWS_SecretKey
+• AWS_Region (Text, Default: "us-east-1")
+• AWS_BucketName (e.g., "outsystems-tiff-convert-abc123")
+
+## Functions
+
+### ConvertTiffS3
+Convert TIFF files to PDF or JPEG format.
+
+Parameters:
+• bucketName (Text): Your S3 bucket name
+• inputS3Key (Text): S3 path to input TIFF (e.g., "uploads/document.tiff")
+• outputS3Key (Text): S3 path for output file (e.g., "converted/document.pdf")
+• awsAccessKey (Text): AWS Access Key ID
+• awsSecretKey (Text): AWS Secret Access Key
+• awsRegion (Text, optional): AWS region (default: "us-east-1")
+• outputFormat (Text, optional): "PDF" or "JPEG" (default: "PDF")
+• quality (Integer, optional): Quality 1-100 (default: 85)
+• compressPdf (Boolean, optional): Compress PDF (default: true)
+
+Returns: ConversionResult with Success, Message, OutputPath, PagesConverted
+
+Example - Convert TIFF to compressed PDF:
+ConvertTiffS3(
+    bucketName: "my-bucket",
+    inputS3Key: "uploads/scan.tiff",
+    outputS3Key: "converted/scan.pdf",
+    awsAccessKey: Site.AWS_AccessKey,
+    awsSecretKey: Site.AWS_SecretKey,
+    outputFormat: "PDF",
+    quality: 85,
+    compressPdf: True
+)
+
+Example - Convert TIFF to JPEG (first page):
+ConvertTiffS3(
+    bucketName: "my-bucket",
+    inputS3Key: "uploads/photo.tiff",
+    outputS3Key: "converted/photo.jpg",
+    awsAccessKey: Site.AWS_AccessKey,
+    awsSecretKey: Site.AWS_SecretKey,
+    outputFormat: "JPEG",
+    quality: 90
+)
+
+### GenerateS3UploadUrl
+Generate pre-signed URL for direct browser upload to S3 (bypasses ODC's 5.5MB limit).
+
+Parameters:
+• bucketName, s3Key, contentType, awsAccessKey, awsSecretKey
+• awsRegion (optional), expirationMinutes (optional, default: 15)
+
+Returns: S3UploadUrlResult with UploadUrl, S3Key, ExpiresAt
+
+### GenerateS3DownloadUrl
+Generate pre-signed URL for direct browser download from S3.
+
+Parameters:
+• bucketName, s3Key, awsAccessKey, awsSecretKey
+• awsRegion (optional), expirationMinutes (optional, default: 15)
+
+Returns: S3DownloadUrlResult with DownloadUrl, S3Key, ExpiresAt
+
+### TestS3Connection
+Verify AWS credentials and S3 connectivity.
+
+Parameters:
+• awsAccessKey, awsSecretKey, awsRegion (optional)
+
+Returns: Text with connection status and accessible bucket list
+
+### DownloadFileFromS3
+Download small files (<5.5MB) directly as binary data.
+
+Parameters:
+• bucketName, s3Key, awsAccessKey, awsSecretKey, awsRegion (optional)
+
+Returns: S3DownloadResult with FileData, FileName, ContentType, FileSize
+
+Note: For files >5.5MB, use GenerateS3DownloadUrl instead.
+
+## Primary Use Case: AI/LLM Document Processing
+
+Process large scanned documents with AI services:
+
+The Challenge:
+• AI APIs have strict file size limits (5-32MB typical)
+• Large TIFFs (100-500MB) exceed these limits
+• API costs scale with file size and tokens
+
+The Solution:
+1. Upload large TIFF to S3 (via GenerateS3UploadUrl)
+2. Convert to compressed PDF with quality=80-85
+   Result: 70-90% smaller files that fit within AI API limits
+3. Send compressed PDF to AI service (Claude, GPT-4, Azure Document Intelligence)
+4. Process AI-extracted data in OutSystems app
+
+Benefits:
+• Convert 200MB TIFFs into 20-30MB PDFs (within API limits)
+• Reduce AI processing costs by 70-90%
+• Faster API responses due to smaller files
+• Optimized for document intelligence workflows
+
+Example Workflow:
+1. Scan documents → large TIFFs (100-300MB)
+2. Upload to S3 via GenerateS3UploadUrl()
+3. Convert via ConvertTiffS3(quality: 80, compressPdf: true)
+4. Download compressed PDF (now 15-40MB)
+5. Send to Claude/GPT-4 for data extraction
+6. Process structured data in OutSystems
+
+## Quality Settings Recommendations
+
+• OCR/LLM Processing: quality=80-85 (good balance, ~75% size reduction)
+• Web Display: quality=70-80 (smaller files, faster loading)
+• Archival/Print: quality=90-95 (highest quality, larger files)
+
+## File Size Limits
+
+Tested & Verified:
+• Files up to 100MB work reliably
+• Multi-page TIFFs process successfully
+
+Expected to Work:
+• Files 100MB-500MB should work depending on complexity
+• May approach 15-minute Lambda timeout for very large files
+
+## Troubleshooting
+
+Error: "AWS credentials cannot be empty"
+• Verify credentials are set in Configuration → Settings
+
+Error: "File not found in S3"
+• Check bucket name is correct
+• Verify S3 key path format (e.g., "uploads/file.tiff", not "/uploads/file.tiff")
+• Ensure IAM user has read permissions
+
+Error: "Invalid image format"
+• Ensure input file is valid TIFF format
+
+Pre-signed URL expired:
+• Default expiration is 15 minutes
+• Generate new URL or increase expirationMinutes parameter
+
+CORS errors in browser:
+• Configure CORS policy on S3 bucket
+• Allow your ODC domain as origin
+• Allow GET/PUT methods
+
+## Support
+
+GitHub: https://github.com/prifken/outsystems-tiff-jpeg-extension
+Issues: Report bugs or feature requests on GitHub
+
+## License
+
+BSD-3-Clause License

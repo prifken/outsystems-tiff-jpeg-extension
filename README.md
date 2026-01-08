@@ -1,10 +1,10 @@
-# TiffConverter - TIFF to PDF/JPEG Converter for OutSystems ODC
+# ImageConverter - TIFF to PDF/JPEG Converter for OutSystems ODC
 
 Convert TIFF files to PDF or JPEG format using AWS S3 for seamless handling of large files in OutSystems Developer Cloud (ODC).
 
 ## Overview
 
-TiffConverter is an External Logic library that enables TIFF image conversion in OutSystems ODC applications. It bypasses ODC's 5.5MB payload limit by using AWS S3 for file storage and processing, making it ideal for document management, scanning workflows, and archival systems.
+ImageConverter is an External Logic library that enables TIFF image conversion in OutSystems ODC applications. It bypasses ODC's 5.5MB payload limit by using AWS S3 for file storage and processing, making it ideal for document management, scanning workflows, and archival systems.
 
 ## Key Features
 
@@ -54,7 +54,7 @@ Convert TIFF files to PDF or JPEG format.
 
 ```
 // Convert TIFF to compressed PDF (recommended)
-Result = TiffConverter.ConvertTiffS3(
+Result = ImageConverter.ConvertTiffS3(
     bucketName: "my-bucket",
     inputS3Key: "uploads/scan.tiff",
     outputS3Key: "converted/scan.pdf",
@@ -66,7 +66,7 @@ Result = TiffConverter.ConvertTiffS3(
 )
 
 // Convert TIFF to JPEG (first page only)
-Result = TiffConverter.ConvertTiffS3(
+Result = ImageConverter.ConvertTiffS3(
     bucketName: "my-bucket",
     inputS3Key: "uploads/photo.tiff",
     outputS3Key: "converted/photo.jpg",
@@ -161,8 +161,8 @@ Process large scanned documents with AI services like Claude, GPT-4, or Azure Do
 **Example AI Workflow:**
 ```
 1. Scan paper documents → large multi-page TIFFs (100-300MB)
-2. Upload to S3 via TiffConverter.GenerateS3UploadUrl()
-3. Convert to compressed PDF via TiffConverter.ConvertTiffS3(quality: 80, compressPdf: true)
+2. Upload to S3 via ImageConverter.GenerateS3UploadUrl()
+3. Convert to compressed PDF via ImageConverter.ConvertTiffS3(quality: 80, compressPdf: true)
 4. Download compressed PDF (now 15-40MB)
 5. Send to Claude/GPT-4 for extraction (invoices, contracts, forms)
 6. Process structured data in OutSystems application
