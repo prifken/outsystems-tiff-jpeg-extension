@@ -207,11 +207,19 @@ public interface IImageConverter
 ```xml
 <!-- ImageConverterLibrary.csproj -->
 <ItemGroup>
-  <!-- Icon for ODC Forge - copy to output directory -->
-  <None Include="icon.png">
-    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-  </None>
+  <!-- Icon for ODC Forge - MUST be embedded resource, not copied file -->
+  <EmbeddedResource Include="icon.png" />
 </ItemGroup>
+```
+
+**CRITICAL:** The icon must be an `<EmbeddedResource>`, NOT `<None>` with `CopyToOutputDirectory`.
+- ❌ **WRONG:** `<None>` with `CopyToOutputDirectory` - OutSystems can't find it
+- ✅ **CORRECT:** `<EmbeddedResource>` - Embeds in DLL, OutSystems finds it
+
+**Error if done incorrectly:**
+```
+The resource name 'icon.png' provided for the element 'ImageConverterLibrary.IImageConverter'
+IconResourceName was not found. (OS-ELG-MODL-05009)
 ```
 
 **Icon appears:**
