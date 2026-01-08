@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'          # Ignore all markdown files (README, LESSONS_LEARNED, etc)
+      - 'docs/**'        # Ignore docs directory
+      - '.gitignore'     # Ignore gitignore changes
+      - '.github/**'     # Ignore workflow changes (use workflow_dispatch to test workflow updates)
   workflow_dispatch:
     inputs:
       environment:

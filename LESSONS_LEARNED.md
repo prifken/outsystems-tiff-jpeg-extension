@@ -158,9 +158,13 @@ public ConversionResult ProcessFileFromS3(string bucketName, string inputKey, st
 
 **Commands to deploy for testing:**
 ```bash
-# After making changes locally
-git add <modified-files>
+# After making changes locally, stage ALL related files
+git add <file1> <file2> <file3>  # Include code + docs together
+
+# Single commit for related changes
 git commit -m "Description of changes"
+
+# Single push = single workflow run
 git push origin main  # Triggers automatic deployment
 
 # Then wait for GitHub Actions to complete
@@ -172,10 +176,61 @@ git push origin main  # Triggers automatic deployment
 - Manually build and upload ZIPs repeatedly
 - Skip the CI/CD pipeline for testing
 - Forget to push before asking to test
+- **Push multiple times for related changes** (batches commits instead)
+
+**Batch Related Changes:**
+```bash
+# BAD - 3 separate pushes = 3 workflow runs = 3 ODC revisions
+git add file1 && git commit -m "Fix" && git push
+git add file2 && git commit -m "Update docs" && git push
+git add file3 && git commit -m "Fix docs" && git push
+
+# GOOD - 1 push = 1 workflow run = 1 ODC revision
+git add file1 file2 file3
+git commit -m "Fix issue and update documentation"
+git push origin main
+```
+
+**Why batching matters:**
+- Each push triggers full build + deploy cycle (2-5 minutes)
+- Each deployment creates a new ODC revision
+- Multiple revisions for the same fix wastes GitHub Actions minutes
+- Cleaner git history
+
+**Documentation-Only Changes:**
+
+**IMPORTANT:** Updating LESSONS_LEARNED.md or README.md should NOT trigger deployment workflows!
+
+Currently, the workflow triggers on ANY push to main. This means documentation updates trigger unnecessary builds/deployments.
+
+**Solution:** Add path filters to `deploy-to-odc.yml`:
+```yaml
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'           # Ignore all markdown files
+      - 'docs/**'        # Ignore docs directory
+      - '.github/**'     # Ignore workflow changes (use workflow_dispatch to test)
+```
+
+**Why this matters:**
+- Documentation updates = no code changes = no need to redeploy
+- Saves GitHub Actions minutes
+- Avoids creating empty ODC revisions
+- Faster iteration on documentation
+
+**Current workaround until workflow is updated:**
+- Batch documentation updates with code changes when possible
+- Or accept that docs-only pushes will trigger builds (they'll succeed quickly since code unchanged)
+
+**Meta-lesson:** This very section was added after triggering 3 workflows when we should have triggered 1! 😄
 
 **When you open this project in Claude Code:**
 - Follow this workflow automatically for any code changes
 - Always commit and push when changes need testing
+- Batch related changes (code + docs) into single commits
 - Include clear commit messages describing what changed
 
 ### 1.6 ODC Forge Preparation
