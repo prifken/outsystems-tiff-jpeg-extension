@@ -872,6 +872,86 @@ git push origin main
 
 **Commit Reference:** `6dc472f`
 
+### 4.6 ODC External Logic Output Payload Limit (CRITICAL)
+
+**Problem:** `OS-ELRT-60009 [Communication] Output payload is too large (7MB), maximum allowed is 5.5MB`
+
+**Root Cause:** ODC External Logic has a **strict 5.5MB limit** on response payloads. The `DetailedLog` field in ConversionResult was accumulating megabytes of diagnostic information for large multi-page TIFFs, exceeding this limit.
+
+**Symptoms:**
+- Conversion succeeds in Lambda (output file appears in S3)
+- But ODC returns generic error: "Something went wrong on our side"
+- Browser console shows payload size error
+- DetailedLog for 200MB TIFF with 50+ pages = ~7MB of text
+
+**Why it happens:**
+- Large files have many pages to process
+- Each page generates logging output (compression stats, timestamps, etc.)
+- Even with `verboseLogging = magickImages.Count <= 5`, summary logs still accumulate
+- Multiple conversion steps × many pages = multi-megabyte logs
+
+**Solution:** Return minimal logs on success, detailed logs only on failure
+```csharp
+// BAD - Returns full detailed log even on success (can be 7MB+)
+return new ConversionResult
+{
+    Success = true,
+    Message = "...",
+    DetailedLog = log.ToString()  // Contains all diagnostic output
+};
+
+// GOOD - Returns minimal summary on success (< 500 bytes)
+var successLog = new StringBuilder();
+successLog.AppendLine("=== Conversion Summary ===");
+successLog.AppendLine($"Status: SUCCESS");
+successLog.AppendLine($"Input: {inputSizeMB:F2} MB");
+successLog.AppendLine($"Output: {outputSizeMB:F2} MB");
+successLog.AppendLine($"Pages: {pageCount}");
+successLog.AppendLine($"Quality: {quality}");
+successLog.AppendLine($"Size Reduction: {sizeReduction:F1}%");
+successLog.AppendLine($"Duration: {duration:F1} seconds");
+
+return new ConversionResult
+{
+    Success = true,
+    Message = "...",
+    DetailedLog = successLog.ToString()  // Only essential summary
+};
+
+// On FAILURE - Still return full detailed log for debugging
+catch (Exception ex)
+{
+    log.AppendLine($"ERROR: {ex.Message}");
+    log.AppendLine($"Stack: {ex.StackTrace}");
+    return new ConversionResult
+    {
+        Success = false,
+        DetailedLog = log.ToString()  // Full diagnostics needed for debugging
+    };
+}
+```
+
+**Key Insight:**
+- **Success cases don't need verbose logs** - user just wants to know it worked
+- **Failure cases NEED verbose logs** - to diagnose what went wrong
+- This dramatically reduces payload size (from 7MB to < 1KB) while preserving debugging capability
+
+**ODC Payload Limit applies to:**
+- Output from External Logic functions
+- Binary data (byte arrays)
+- Text fields (like DetailedLog)
+- Structure fields combined
+
+**Testing Strategy:**
+1. Use `GetS3FileInfo()` diagnostic (quick HEAD request, < 1KB response)
+2. Try conversion with `quality=25` first (faster processing, smaller logs)
+3. If success, increase quality gradually
+4. For very large files (>200MB), consider lower quality to stay within execution time limits
+
+**Related Issue:** Initial suspicion was "SSL handshake error" or "timeout" because error appeared after 20-30 seconds. Actually the conversion was succeeding, but the response was too large to return to ODC.
+
+**Commit Reference:** `2b6adc6`
+
 ---
 
 ## GitHub Actions Best Practices
