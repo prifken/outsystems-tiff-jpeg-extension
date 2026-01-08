@@ -1611,6 +1611,112 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
+    /// Lists files in an S3 bucket with optional prefix filtering
+    /// </summary>
+    public S3ListResult ListS3BucketFiles(
+        string bucketName,
+        string awsAccessKey,
+        string awsSecretKey,
+        string awsRegion = "us-east-1",
+        string prefix = "",
+        int maxResults = 100)
+    {
+        try
+        {
+            // Validate inputs
+            if (string.IsNullOrWhiteSpace(bucketName))
+                return new S3ListResult
+                {
+                    Success = false,
+                    Message = "Bucket name cannot be empty",
+                    Files = new List<S3FileInfo>(),
+                    FileCount = 0
+                };
+
+            if (string.IsNullOrWhiteSpace(awsAccessKey) || string.IsNullOrWhiteSpace(awsSecretKey))
+                return new S3ListResult
+                {
+                    Success = false,
+                    Message = "AWS credentials cannot be empty",
+                    Files = new List<S3FileInfo>(),
+                    FileCount = 0
+                };
+
+            // Limit max results to 1000
+            if (maxResults > 1000)
+                maxResults = 1000;
+
+            // Create AWS credentials and S3 client
+            var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
+            var regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
+            using var s3Client = new AmazonS3Client(credentials, regionEndpoint);
+
+            // List objects with optional prefix
+            var listRequest = new ListObjectsV2Request
+            {
+                BucketName = bucketName,
+                MaxKeys = maxResults
+            };
+
+            if (!string.IsNullOrWhiteSpace(prefix))
+                listRequest.Prefix = prefix;
+
+            var listResponse = s3Client.ListObjectsV2Async(listRequest).GetAwaiter().GetResult();
+
+            // Convert to S3FileInfo list
+            var files = new List<S3FileInfo>();
+            foreach (var s3Object in listResponse.S3Objects)
+            {
+                // Skip folders (keys ending with /)
+                if (s3Object.Key.EndsWith("/"))
+                    continue;
+
+                var fileName = s3Object.Key.Contains('/')
+                    ? s3Object.Key.Substring(s3Object.Key.LastIndexOf('/') + 1)
+                    : s3Object.Key;
+
+                files.Add(new S3FileInfo
+                {
+                    Key = s3Object.Key,
+                    Size = s3Object.Size,
+                    SizeMB = $"{s3Object.Size / 1024.0 / 1024.0:F2} MB",
+                    LastModified = s3Object.LastModified,
+                    FileName = fileName
+                });
+            }
+
+            return new S3ListResult
+            {
+                Success = true,
+                Message = $"Found {files.Count} file(s) in bucket '{bucketName}'" +
+                         (string.IsNullOrWhiteSpace(prefix) ? "" : $" with prefix '{prefix}'"),
+                Files = files,
+                FileCount = files.Count
+            };
+        }
+        catch (AmazonS3Exception s3Ex)
+        {
+            return new S3ListResult
+            {
+                Success = false,
+                Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
+                Files = new List<S3FileInfo>(),
+                FileCount = 0
+            };
+        }
+        catch (Exception ex)
+        {
+            return new S3ListResult
+            {
+                Success = false,
+                Message = $"Error listing files: {ex.Message}",
+                Files = new List<S3FileInfo>(),
+                FileCount = 0
+            };
+        }
+    }
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>

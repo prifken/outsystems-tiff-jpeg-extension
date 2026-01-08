@@ -287,4 +287,50 @@ public interface IImageConverter
             Description = "AWS Region (default: us-east-1)",
             DataType = OSDataType.Text)]
         string awsRegion = "us-east-1");
+
+    /// <summary>
+    /// Lists files in an S3 bucket with optional prefix filtering
+    /// </summary>
+    /// <param name="bucketName">S3 bucket name</param>
+    /// <param name="awsAccessKey">AWS Access Key ID</param>
+    /// <param name="awsSecretKey">AWS Secret Access Key</param>
+    /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
+    /// <param name="prefix">Optional prefix to filter files (e.g., "uploads/" to list only files in uploads folder)</param>
+    /// <param name="maxResults">Maximum number of files to return (default: 100, max: 1000)</param>
+    /// <returns>List of files with metadata</returns>
+    [OSAction(
+        Description = "List files in S3 bucket (with optional prefix filter for folders)",
+        ReturnName = "result",
+        ReturnDescription = "List of files with key, size, and last modified date",
+        ReturnType = OSDataType.InferredFromDotNetType)]
+    S3ListResult ListS3BucketFiles(
+        [OSParameter(
+            Description = "S3 bucket name",
+            DataType = OSDataType.Text)]
+        string bucketName,
+
+        [OSParameter(
+            Description = "AWS Access Key ID",
+            DataType = OSDataType.Text)]
+        string awsAccessKey,
+
+        [OSParameter(
+            Description = "AWS Secret Access Key",
+            DataType = OSDataType.Text)]
+        string awsSecretKey,
+
+        [OSParameter(
+            Description = "AWS Region (default: us-east-1)",
+            DataType = OSDataType.Text)]
+        string awsRegion = "us-east-1",
+
+        [OSParameter(
+            Description = "Prefix to filter files (e.g., 'uploads/', 'converted/'). Leave empty to list all files.",
+            DataType = OSDataType.Text)]
+        string prefix = "",
+
+        [OSParameter(
+            Description = "Maximum number of files to return (default: 100, max: 1000)",
+            DataType = OSDataType.Integer)]
+        int maxResults = 100);
 }

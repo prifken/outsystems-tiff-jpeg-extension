@@ -217,3 +217,71 @@ public struct S3DownloadResult
         IsMandatory = false)]
     public long FileSize;
 }
+
+/// <summary>
+/// Information about a single file in S3 bucket
+/// </summary>
+[OSStructure(Description = "S3 file information for bucket listing")]
+public struct S3FileInfo
+{
+    [OSStructureField(
+        Description = "S3 key (full path) of the file",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string Key;
+
+    [OSStructureField(
+        Description = "File size in bytes",
+        DataType = OSDataType.LongInteger,
+        IsMandatory = true)]
+    public long Size;
+
+    [OSStructureField(
+        Description = "File size in MB (formatted)",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string SizeMB;
+
+    [OSStructureField(
+        Description = "Last modified date (UTC)",
+        DataType = OSDataType.DateTime,
+        IsMandatory = true)]
+    public DateTime LastModified;
+
+    [OSStructureField(
+        Description = "File name (without path)",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string FileName;
+}
+
+/// <summary>
+/// Result structure for listing S3 bucket contents
+/// </summary>
+[OSStructure(Description = "Result from listing S3 bucket files")]
+public struct S3ListResult
+{
+    [OSStructureField(
+        Description = "Indicates if listing was successful",
+        DataType = OSDataType.Boolean,
+        IsMandatory = true)]
+    public bool Success;
+
+    [OSStructureField(
+        Description = "Status message or error details",
+        DataType = OSDataType.Text,
+        IsMandatory = true)]
+    public string Message;
+
+    [OSStructureField(
+        Description = "List of files in the bucket",
+        DataType = OSDataType.InferredFromDotNetType,
+        IsMandatory = false)]
+    public List<S3FileInfo> Files;
+
+    [OSStructureField(
+        Description = "Total number of files found",
+        DataType = OSDataType.Integer,
+        IsMandatory = false)]
+    public int FileCount;
+}
