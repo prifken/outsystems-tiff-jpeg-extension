@@ -30,4 +30,11 @@
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.2.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Icon for ODC Forge - copy to output directory -->
+    <None Include="icon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

@@ -16,6 +16,48 @@ namespace ImageConverterLibrary;
 public class ImageConverter : IImageConverter
 {
     /// <summary>
+    /// Converts TIFF file from S3 to PDF or JPEG and saves back to S3
+    /// Unified conversion function supporting multiple output formats
+    /// </summary>
+    public ConversionResult ConvertTiffS3(
+        string bucketName,
+        string inputS3Key,
+        string outputS3Key,
+        string awsAccessKey,
+        string awsSecretKey,
+        string awsRegion = "us-east-1",
+        string outputFormat = "PDF",
+        int quality = 85,
+        bool compressPdf = true)
+    {
+        var normalizedFormat = outputFormat?.Trim().ToUpperInvariant() ?? "PDF";
+        if (normalizedFormat != "PDF" && normalizedFormat != "JPEG")
+        {
+            return new ConversionResult
+            {
+                Success = false,
+                Message = $"Invalid outputFormat {outputFormat}. Must be 'PDF' or 'JPEG'.",
+                DetailedLog = $"Error: outputFormat parameter must be 'PDF' or 'JPEG', received: {outputFormat}"
+            };
+        }
+        if (normalizedFormat == "JPEG")
+        {
+            return ConvertTiffToJpegS3(bucketName, inputS3Key, outputS3Key, awsAccessKey, awsSecretKey, awsRegion, quality);
+        }
+        else
+        {
+            if (compressPdf)
+            {
+                return ConvertTiffToCompressedPdfS3(bucketName, inputS3Key, outputS3Key, awsAccessKey, awsSecretKey, awsRegion, quality);
+            }
+            else
+            {
+                return ConvertTiffToPdfS3(bucketName, inputS3Key, outputS3Key, awsAccessKey, awsSecretKey, awsRegion);
+            }
+        }
+    }
+
+    /// <summary>
     /// Tests the connection to AWS S3 using provided credentials
     /// </summary>
     /// <param name="awsAccessKey">AWS Access Key ID</param>
