@@ -271,11 +271,35 @@ public interface IImageConverter
 - ❌ **WRONG:** `<None>` with `CopyToOutputDirectory` - OutSystems can't find it
 - ✅ **CORRECT:** `<EmbeddedResource>` - Embeds in DLL, OutSystems finds it
 
+**CRITICAL:** The resource name must include the namespace prefix!
+
+.NET embedded resources are named: `<RootNamespace>.<FileName>`
+
+```csharp
+// IImageConverter.cs
+// ❌ WRONG - Missing namespace prefix
+[OSInterface(
+    Name = "ImageConverter",
+    IconResourceName = "icon.png")]  // This won't work!
+
+// ✅ CORRECT - Includes namespace from .csproj
+[OSInterface(
+    Name = "ImageConverter",
+    IconResourceName = "ImageConverterLibrary.icon.png")]  // This works!
+```
+
+**How to determine the correct name:**
+1. Check `<RootNamespace>` in your `.csproj` file (e.g., `ImageConverterLibrary`)
+2. Add your icon filename: `<RootNamespace>.<IconFile>` (e.g., `ImageConverterLibrary.icon.png`)
+3. Use this full name in `IconResourceName`
+
 **Error if done incorrectly:**
 ```
 The resource name 'icon.png' provided for the element 'ImageConverterLibrary.IImageConverter'
 IconResourceName was not found. (OS-ELG-MODL-05009)
 ```
+
+**Commit Reference:** `55ed569`
 
 **Icon appears:**
 - In ODC Portal library list
