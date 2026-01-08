@@ -160,7 +160,7 @@ public class ImageConverter : IImageConverter
             if (quality < 1 || quality > 100)
             {
                 log.AppendLine($"ERROR: Quality value {quality} is out of range (1-100)");
-                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100", OutputData = null, DetailedLog = log.ToString() };
             }
 
             log.AppendLine("Validation passed");
@@ -317,6 +317,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Conversion error: {ex.Message}",
                 OutputPath = string.Empty,
                 PagesConverted = 0,
+                OutputData = null,
                 DetailedLog = log.ToString()
             };
         }
@@ -541,25 +542,25 @@ public class ImageConverter : IImageConverter
             if (string.IsNullOrWhiteSpace(bucketName))
             {
                 log.AppendLine("ERROR: Bucket name is null or empty");
-                return new ConversionResult { Success = false, Message = "Bucket name cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Bucket name cannot be empty", OutputData = null, DetailedLog = log.ToString() };
             }
 
             if (string.IsNullOrWhiteSpace(inputS3Key))
             {
                 log.AppendLine("ERROR: Input S3 key is null or empty");
-                return new ConversionResult { Success = false, Message = "Input S3 key cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Input S3 key cannot be empty", OutputData = null, DetailedLog = log.ToString() };
             }
 
             if (string.IsNullOrWhiteSpace(outputS3Key))
             {
                 log.AppendLine("ERROR: Output S3 key is null or empty");
-                return new ConversionResult { Success = false, Message = "Output S3 key cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Output S3 key cannot be empty", OutputData = null, DetailedLog = log.ToString() };
             }
 
             if (quality < 1 || quality > 100)
             {
                 log.AppendLine($"ERROR: Quality value {quality} is out of range (1-100)");
-                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100", OutputData = null, DetailedLog = log.ToString() };
             }
 
             log.AppendLine("Validation passed");
@@ -703,6 +704,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Successfully converted TIFF to JPEG via S3 (quality: {quality}). Output: s3://{bucketName}/{outputS3Key}",
                 OutputPath = outputS3Key,
                 PagesConverted = 1,
+                OutputData = null,  // S3 conversions do not return binary data
                 DetailedLog = successLog.ToString()
             };
         }
@@ -726,6 +728,7 @@ public class ImageConverter : IImageConverter
                 Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
                 OutputPath = string.Empty,
                 PagesConverted = 0,
+                OutputData = null,
                 DetailedLog = log.ToString()
             };
         }
@@ -771,6 +774,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Conversion error: {ex.Message}",
                 OutputPath = string.Empty,
                 PagesConverted = 0,
+                OutputData = null,
                 DetailedLog = log.ToString()
             };
         }
@@ -804,13 +808,13 @@ public class ImageConverter : IImageConverter
             // Validate inputs
             log.AppendLine("[STEP 1] Validating inputs...");
             if (string.IsNullOrWhiteSpace(bucketName))
-                return new ConversionResult { Success = false, Message = "Bucket name cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Bucket name cannot be empty", OutputData = null, DetailedLog = log.ToString() };
 
             if (string.IsNullOrWhiteSpace(inputS3Key))
-                return new ConversionResult { Success = false, Message = "Input S3 key cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Input S3 key cannot be empty", OutputData = null, DetailedLog = log.ToString() };
 
             if (string.IsNullOrWhiteSpace(outputS3Key))
-                return new ConversionResult { Success = false, Message = "Output S3 key cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Output S3 key cannot be empty", OutputData = null, DetailedLog = log.ToString() };
 
             log.AppendLine("✓ All inputs valid");
             log.AppendLine();
@@ -893,6 +897,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Successfully converted {magickImageCollection.Count}-page TIFF to PDF via S3. Output: s3://{bucketName}/{outputS3Key}",
                 OutputPath = outputS3Key,
                 PagesConverted = magickImageCollection.Count,
+                OutputData = null,  // S3 conversions do not return binary data
                 DetailedLog = successLog.ToString()
             };
         }
@@ -912,6 +917,7 @@ public class ImageConverter : IImageConverter
                 Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
                 OutputPath = string.Empty,
                 PagesConverted = 0,
+                OutputData = null,
                 DetailedLog = log.ToString()
             };
         }
@@ -930,6 +936,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Conversion error: {ex.Message}",
                 OutputPath = string.Empty,
                 PagesConverted = 0,
+                OutputData = null,
                 DetailedLog = log.ToString()
             };
         }
@@ -965,16 +972,16 @@ public class ImageConverter : IImageConverter
             // Validate inputs
             log.AppendLine("[STEP 1] Validating inputs...");
             if (string.IsNullOrWhiteSpace(bucketName))
-                return new ConversionResult { Success = false, Message = "Bucket name cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Bucket name cannot be empty", OutputData = null, DetailedLog = log.ToString() };
 
             if (string.IsNullOrWhiteSpace(inputS3Key))
-                return new ConversionResult { Success = false, Message = "Input S3 key cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Input S3 key cannot be empty", OutputData = null, DetailedLog = log.ToString() };
 
             if (string.IsNullOrWhiteSpace(outputS3Key))
-                return new ConversionResult { Success = false, Message = "Output S3 key cannot be empty", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Output S3 key cannot be empty", OutputData = null, DetailedLog = log.ToString() };
 
             if (quality < 1 || quality > 100)
-                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100", DetailedLog = log.ToString() };
+                return new ConversionResult { Success = false, Message = "Quality must be between 1 and 100", OutputData = null, DetailedLog = log.ToString() };
 
             log.AppendLine("✓ All inputs valid");
             log.AppendLine();
@@ -1091,6 +1098,7 @@ public class ImageConverter : IImageConverter
                 {
                     Success = false,
                     Message = "PDF creation failed - stream is empty",
+                    OutputData = null,
                     DetailedLog = log.ToString()
                 };
             }
@@ -1148,6 +1156,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Successfully converted {magickImages.Count}-page TIFF to compressed PDF ({sizeReduction:F1}% smaller). Quality: {quality}. Output: s3://{bucketName}/{outputS3Key}",
                 OutputPath = outputS3Key,
                 PagesConverted = magickImages.Count,
+                OutputData = null,  // S3 conversions do not return binary data
                 DetailedLog = successLog.ToString()  // Minimal log for success to avoid payload size errors
             };
         }
@@ -1183,6 +1192,7 @@ public class ImageConverter : IImageConverter
                 Message = $"S3 Error: {s3Ex.Message} (ErrorCode: {s3Ex.ErrorCode})",
                 OutputPath = string.Empty,
                 PagesConverted = 0,
+                OutputData = null,
                 DetailedLog = log.ToString()
             };
         }
@@ -1214,6 +1224,7 @@ public class ImageConverter : IImageConverter
                 Message = $"Conversion error: {ex.Message}",
                 OutputPath = string.Empty,
                 PagesConverted = 0,
+                OutputData = null,
                 DetailedLog = log.ToString()
             };
         }
