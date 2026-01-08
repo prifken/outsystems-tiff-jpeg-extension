@@ -246,4 +246,45 @@ public interface IImageConverter
             Description = "URL expiration in minutes (default: 15)",
             DataType = OSDataType.Integer)]
         int expirationMinutes = 15);
+
+    /// <summary>
+    /// Gets S3 file metadata without downloading (diagnostic tool)
+    /// Use this to test S3 connectivity and check file size before conversion
+    /// </summary>
+    /// <param name="bucketName">S3 bucket name</param>
+    /// <param name="s3Key">S3 key of file to check</param>
+    /// <param name="awsAccessKey">AWS Access Key ID</param>
+    /// <param name="awsSecretKey">AWS Secret Access Key</param>
+    /// <param name="awsRegion">AWS Region (default: us-east-1)</param>
+    /// <returns>File metadata including size, last modified, content type</returns>
+    [OSAction(
+        Description = "Get S3 file metadata without downloading (test connectivity and check file size)",
+        ReturnName = "result",
+        ReturnDescription = "File metadata with size, last modified, and diagnostic info",
+        ReturnType = OSDataType.Text)]
+    string GetS3FileInfo(
+        [OSParameter(
+            Description = "S3 bucket name",
+            DataType = OSDataType.Text)]
+        string bucketName,
+
+        [OSParameter(
+            Description = "S3 key of file to check",
+            DataType = OSDataType.Text)]
+        string s3Key,
+
+        [OSParameter(
+            Description = "AWS Access Key ID",
+            DataType = OSDataType.Text)]
+        string awsAccessKey,
+
+        [OSParameter(
+            Description = "AWS Secret Access Key",
+            DataType = OSDataType.Text)]
+        string awsSecretKey,
+
+        [OSParameter(
+            Description = "AWS Region (default: us-east-1)",
+            DataType = OSDataType.Text)]
+        string awsRegion = "us-east-1");
 }

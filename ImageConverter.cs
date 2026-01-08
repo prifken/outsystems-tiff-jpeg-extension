@@ -1467,6 +1467,150 @@ public class ImageConverter : IImageConverter
     }
 
     /// <summary>
+    /// Gets S3 file metadata without downloading (diagnostic tool)
+    /// Use this to test S3 connectivity and check file size before conversion
+    /// </summary>
+    public string GetS3FileInfo(
+        string bucketName,
+        string s3Key,
+        string awsAccessKey,
+        string awsSecretKey,
+        string awsRegion = "us-east-1")
+    {
+        var log = new StringBuilder();
+        var startTime = DateTime.UtcNow;
+
+        try
+        {
+            log.AppendLine("=== S3 File Info Diagnostic ===");
+            log.AppendLine($"Start Time: {startTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            log.AppendLine($"Bucket: {bucketName}");
+            log.AppendLine($"S3 Key: {s3Key}");
+            log.AppendLine($"Region: {awsRegion}");
+            log.AppendLine();
+
+            // Validate inputs
+            if (string.IsNullOrWhiteSpace(bucketName))
+            {
+                log.AppendLine("ERROR: Bucket name cannot be empty");
+                return log.ToString();
+            }
+
+            if (string.IsNullOrWhiteSpace(s3Key))
+            {
+                log.AppendLine("ERROR: S3 key cannot be empty");
+                return log.ToString();
+            }
+
+            if (string.IsNullOrWhiteSpace(awsAccessKey) || string.IsNullOrWhiteSpace(awsSecretKey))
+            {
+                log.AppendLine("ERROR: AWS credentials cannot be empty");
+                return log.ToString();
+            }
+
+            // Create AWS credentials and S3 client
+            log.AppendLine("[Step 1] Creating S3 client...");
+            var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
+            var regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(awsRegion);
+            using var s3Client = new AmazonS3Client(credentials, regionEndpoint);
+            log.AppendLine($"✓ S3 client created");
+            log.AppendLine($"  Endpoint: {s3Client.Config.ServiceURL ?? s3Client.Config.RegionEndpoint?.DisplayName ?? "default"}");
+            log.AppendLine($"  Timeout: {s3Client.Config.Timeout?.TotalSeconds ?? 0} seconds");
+            log.AppendLine($"  Max retries: {s3Client.Config.MaxErrorRetry}");
+            log.AppendLine();
+
+            // Get object metadata (HEAD request - no data transfer)
+            log.AppendLine("[Step 2] Fetching file metadata (HEAD request)...");
+            var metadataRequest = new GetObjectMetadataRequest
+            {
+                BucketName = bucketName,
+                Key = s3Key
+            };
+
+            var metadataStartTime = DateTime.UtcNow;
+            var metadata = s3Client.GetObjectMetadataAsync(metadataRequest).GetAwaiter().GetResult();
+            var metadataEndTime = DateTime.UtcNow;
+
+            log.AppendLine($"✓ Metadata retrieved successfully");
+            log.AppendLine($"  Request duration: {(metadataEndTime - metadataStartTime).TotalMilliseconds:F2} ms");
+            log.AppendLine();
+
+            // Display file information
+            log.AppendLine("=== FILE INFORMATION ===");
+            log.AppendLine($"File Size: {metadata.ContentLength:N0} bytes ({metadata.ContentLength / 1024.0 / 1024.0:F2} MB)");
+            log.AppendLine($"Content Type: {metadata.Headers.ContentType}");
+            log.AppendLine($"Last Modified: {metadata.LastModified:yyyy-MM-dd HH:mm:ss UTC}");
+            log.AppendLine($"ETag: {metadata.ETag}");
+
+            if (metadata.Headers.ContentEncoding != null)
+                log.AppendLine($"Content Encoding: {metadata.Headers.ContentEncoding}");
+
+            // Add size-based recommendations
+            log.AppendLine();
+            log.AppendLine("=== CONVERSION RECOMMENDATIONS ===");
+            var fileSizeMB = metadata.ContentLength / 1024.0 / 1024.0;
+
+            if (fileSizeMB < 50)
+                log.AppendLine("✓ File size is good for conversion (< 50 MB)");
+            else if (fileSizeMB < 100)
+                log.AppendLine("⚠ File is medium-sized (50-100 MB). Conversion should work.");
+            else if (fileSizeMB < 200)
+                log.AppendLine("⚠ File is large (100-200 MB). Conversion may take longer but should succeed.");
+            else if (fileSizeMB < 500)
+                log.AppendLine("⚠⚠ File is very large (200-500 MB). May approach Lambda timeout limits.");
+            else
+                log.AppendLine("❌ File is extremely large (> 500 MB). May exceed Lambda processing limits.");
+
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine($"Total Duration: {(endTime - startTime).TotalMilliseconds:F2} ms");
+            log.AppendLine($"Status: SUCCESS");
+
+            return log.ToString();
+        }
+        catch (AmazonS3Exception s3Ex)
+        {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine("=== EXCEPTION: AmazonS3Exception ===");
+            log.AppendLine($"Message: {s3Ex.Message}");
+            log.AppendLine($"Error Code: {s3Ex.ErrorCode}");
+            log.AppendLine($"Status Code: {s3Ex.StatusCode}");
+            log.AppendLine($"Request ID: {s3Ex.RequestId}");
+
+            if (s3Ex.InnerException != null)
+            {
+                log.AppendLine($"Inner Exception: {s3Ex.InnerException.GetType().FullName}");
+                log.AppendLine($"Inner Message: {s3Ex.InnerException.Message}");
+            }
+
+            log.AppendLine($"Duration before failure: {(endTime - startTime).TotalSeconds:F2} seconds");
+            log.AppendLine($"Status: FAILED");
+
+            return log.ToString();
+        }
+        catch (Exception ex)
+        {
+            var endTime = DateTime.UtcNow;
+            log.AppendLine();
+            log.AppendLine($"=== EXCEPTION: {ex.GetType().FullName} ===");
+            log.AppendLine($"Message: {ex.Message}");
+
+            if (ex.InnerException != null)
+            {
+                log.AppendLine($"Inner Exception: {ex.InnerException.GetType().FullName}");
+                log.AppendLine($"Inner Message: {ex.InnerException.Message}");
+            }
+
+            log.AppendLine($"Stack Trace: {ex.StackTrace}");
+            log.AppendLine($"Duration before failure: {(endTime - startTime).TotalSeconds:F2} seconds");
+            log.AppendLine($"Status: FAILED");
+
+            return log.ToString();
+        }
+    }
+
+    /// <summary>
     /// Gets the current server timestamp for testing
     /// </summary>
     /// <returns>Current UTC timestamp</returns>
