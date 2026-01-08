@@ -31,10 +31,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Icon for ODC Forge - copy to output directory -->
-    <None Include="icon.png">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
+    <!-- Icon for ODC Forge - embed in assembly -->
+    <EmbeddedResource Include="icon.png" />
   </ItemGroup>
 
 </Project>
