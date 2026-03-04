@@ -952,6 +952,60 @@ catch (Exception ex)
 
 **Commit Reference:** `2b6adc6`
 
+### 4.7 No System Fonts on Lambda (CRITICAL for any drawing library)
+
+**Problem:** Any library that draws text (PdfSharpCore, SkiaSharp, etc.) fails on Lambda with:
+`No Fonts installed on this device!`
+
+**Root Cause:** AWS Lambda runs on a minimal Amazon Linux image with no system fonts installed. Libraries that rely on `FontConfig` or system font directories fail at runtime even if they compile fine locally.
+
+**Solution for PdfSharpCore:** Implement `IFontResolver`, embed TTF font files as `<EmbeddedResource>` in the DLL, register via `GlobalFontSettings.FontResolver` in a static constructor.
+
+```csharp
+static MyClass()
+{
+    GlobalFontSettings.FontResolver = new EmbeddedFontResolver();
+}
+```
+
+**HOWEVER — PdfSharpCore has a separate bug:** `OpenTypeFontface.Read()` throws `"An item with the same key has already been added. Key: ata-"` for many common fonts (Open Sans, DejaVu Sans). This is a PdfSharpCore bug in its OpenType table parser and affects version 1.3.65.
+
+**Better solution: Use iText7 instead of PdfSharpCore.**
+- iText7 has built-in standard PDF fonts (Helvetica, Courier, Times) via `StandardFonts.HELVETICA`
+- No font files needed, no font resolver, no Lambda issues
+- `PdfFontFactory.CreateFont(StandardFonts.HELVETICA)` just works
+
+### 4.8 iText7 8.x Requires BouncyCastle Adapter
+
+**Problem:** iText7 version 8.x throws `Unknown PdfException` at `SmartModePdfObjectsSerializer..ctor()` on Lambda.
+
+**Root Cause:** iText7 8.x requires BouncyCastle for cryptographic operations used during `PdfWriter` initialization. Without it, the constructor fails.
+
+**Solution:** Add the BouncyCastle adapter NuGet package alongside iText7:
+
+```xml
+<PackageReference Include="itext7" Version="8.0.5" />
+<PackageReference Include="itext7.bouncy-castle-adapter" Version="8.0.5" />
+```
+
+**Note:** iText7 Community is AGPL licensed (free for open source). For commercial use, a paid license is required.
+
+### 4.9 ODC Generation API Field Name: HighCodeBinaryUri
+
+**Problem:** Step 4 (Start Generation) fails with:
+`"HighCodeBinaryUri: The HighCodeBinaryUri field is required."`
+
+**Root Cause:** The ODC External Libraries API changed the field name in the generation request body from `downloadUrl` to `HighCodeBinaryUri`.
+
+**Solution:** Use `HighCodeBinaryUri` (or `highCodeBinaryUri` — API appears case-insensitive) in the Step 4 POST body:
+
+```powershell
+$body = @{
+    fileName         = "MyLibrary-1.zip"
+    HighCodeBinaryUri = $downloadUrl
+} | ConvertTo-Json
+```
+
 ---
 
 ## GitHub Actions Best Practices
